@@ -1,0 +1,6 @@
+dateparser
+python-dotenv
+PyYAML
+requests
+pytest
+ 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
+r"""
 team_email_digest.py — Phase 2
 
 Moves the Phase 1 prototype toward a scalable, config-driven digest tool.
@@ -26,13 +26,12 @@ USAGE (examples):
 from __future__ import annotations
 import argparse
 import datetime as dt
-import io
 import json
 import os
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import yaml  # Optional; only needed if using YAML config
@@ -52,16 +51,11 @@ def parse_date(s: Optional[str]) -> Optional[dt.datetime]:
     if not s:
         return None
     s = s.strip()
-    # Accept YYYY-MM-DD or ISO datetime
     for fmt in (ISO_DATE, ISO_DATETIME):
         try:
-            if fmt == ISO_DATE:
-                return dt.datetime.strptime(s, fmt)
-            else:
-                return dt.datetime.strptime(s, fmt)
+            return dt.datetime.strptime(s, fmt)
         except ValueError:
             continue
-    # Try more forgiving parse: add time if only date present
     try:
         return dt.datetime.fromisoformat(s)
     except Exception:
@@ -78,7 +72,6 @@ def within_range(path: str, start: Optional[dt.datetime], end: Optional[dt.datet
     if start and mtime < start:
         return False
     if end and mtime >= (end + dt.timedelta(days=1) if end.time() == dt.time() else end):
-        # If end provided as a date (midnight), include the full day by adding 1 day
         return False
     return True
 
@@ -89,13 +82,11 @@ def load_config(path: Optional[str]) -> Dict[str, Any]:
         raise FileNotFoundError(f"Config not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
-    # Try YAML first if available and extension looks like YAML
     ext = os.path.splitext(path)[1].lower()
     if ext in (".yaml", ".yml"):
         if not _YAML_AVAILABLE:
             raise RuntimeError("PyYAML is not installed, but a YAML config was provided.")
         return yaml.safe_load(text) or {}
-    # Fallback to JSON
     return json.loads(text)
 
 def coalesce(*vals, default=None):
@@ -106,13 +97,47 @@ def coalesce(*vals, default=None):
 
 
 # -------------------------
-# Extraction Logic
+# Robust JSON extraction
 # -------------------------
 
 JSON_BLOCK_RE = re.compile(
     r"""(?P<json>\{\s*(?:"summary"|["']summary["']).*?\})""",
     re.DOTALL | re.IGNORECASE,
 )
+
+def _extract_balanced_json(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract the first balanced {...} JSON object from the text (stack-based),
+    then parse it. This survives nested braces inside arrays and objects.
+    Returns the dict if it parses and contains a 'summary' key, else None.
+    """
+    s = text
+    n = len(s)
+    i = 0
+    while i < n:
+        if s[i] == "{":
+            depth = 0
+            j = i
+            while j < n:
+                ch = s[j]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        blob = s[i : j + 1]
+                        try:
+                            obj = json.loads(blob)
+                            if isinstance(obj, dict) and any(k.lower() == "summary" for k in obj.keys()):
+                                return obj
+                        except Exception:
+                            # continue scanning after this closing brace
+                            pass
+                        i = j  # jump ahead
+                        break
+                j += 1
+        i += 1
+    return None
 
 # Heuristic phrases (add as needed)
 RISK_TERMS = [
@@ -125,7 +150,7 @@ DEPENDENCY_TERMS = [
 ]
 OPEN_Q_TERMS = [
     r"\bopen question(s)?\b", r"\bTBD\b", r"\bunknown\b", r"\bneed(s)? decision\b",
-    r"\bclarify\b", r"\b?\s*\?$", r"\bwho owns\b", r"\bwhen can\b", r"\bhow do\b",
+    r"\bclarify\b", r"\?\s*$", r"\bwho owns\b", r"\bwhen can\b", r"\bhow do\b",
 ]
 
 LINE_SPLIT_RE = re.compile(r"\r?\n")
@@ -142,14 +167,12 @@ def iter_sources(stdin_ok: bool, input_path: Optional[str]) -> Iterable[Tuple[st
             for root, _, files in os.walk(input_path):
                 for fn in files:
                     full = os.path.join(root, fn)
-                    # Only consider text-ish files
                     if not any(fn.lower().endswith(ext) for ext in (".log", ".txt", ".json", ".out")):
                         continue
                     yield (full, read_text_safely(full))
         else:
             yield (input_path, read_text_safely(input_path))
     elif stdin_ok and not sys.stdin.closed and not sys.stdin.isatty():
-        # Slurp stdin
         data = sys.stdin.read()
         if data.strip():
             yield ("<stdin>", data)
@@ -158,17 +181,21 @@ def read_text_safely(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
-    except Exception as e:
-        return f""  # Skip unreadable files silently; could log if needed.
+    except Exception:
+        return ""
 
 def extract_json_blocks(text: str) -> List[Dict[str, Any]]:
     """
     Find JSON-like blocks that include at least the 'summary' key.
+    Strategy:
+      1) Regex (fast) — may fail on deep nesting.
+      2) Balanced-brace scan (robust).
     """
     results: List[Dict[str, Any]] = []
+
+    # 1) Regex attempt(s)
     for m in JSON_BLOCK_RE.finditer(text):
         blob = m.group("json")
-        # Be lenient about single quotes and trailing commas
         fixed = (
             blob.replace("'", '"')
                 .replace(",\n}", "\n}")
@@ -179,7 +206,6 @@ def extract_json_blocks(text: str) -> List[Dict[str, Any]]:
             if isinstance(obj, dict) and any(k.lower() == "summary" for k in obj.keys()):
                 results.append(obj)
         except Exception:
-            # Try a second pass: trim code-fences or surrounding noise
             cleaned = fixed.strip().strip("`").strip()
             try:
                 obj = json.loads(cleaned)
@@ -187,27 +213,77 @@ def extract_json_blocks(text: str) -> List[Dict[str, Any]]:
                     results.append(obj)
             except Exception:
                 continue
+
+    # 2) Balanced-brace fallback (first valid dict)
+    if not results:
+        obj = _extract_balanced_json(text)
+        if obj is not None:
+            results.append(obj)
+
     return results
+
+def _normalize_waiting_on_line(s: str) -> Optional[str]:
+    """
+    Return a normalized 'waiting on ...' phrase in lowercase without trailing punctuation.
+    E.g., 'Blocker: waiting on External API keys.' -> 'waiting on external api keys'
+    """
+    low = s.lower()
+    idx = low.find("waiting on")
+    if idx == -1:
+        return None
+    tail = low[idx:].strip()
+    # strip leading 'waiting on' and any separators
+    tail = tail[len("waiting on"):].strip(" :.-\t")
+    # cut at sentence boundary
+    tail = re.split(r"[\.!\n\r]", tail, maxsplit=1)[0].strip()
+    if not tail:
+        return None
+    return f"waiting on {tail}"
 
 def extract_heuristics(text: str) -> Dict[str, List[str]]:
     """
     Heuristically collect risks, dependencies, and open questions from text lines.
+    - Lines containing 'blocker' are treated as both risk and dependency.
+    - Lines containing 'waiting on' are treated as dependencies (line kept verbatim),
+      AND we add a normalized 'waiting on ...' form to guarantee substring matches.
+    - We also scan the whole text for 'waiting on …' to catch single-line bodies.
     """
     risks, deps, open_qs = set(), set(), set()
-    lines = LINE_SPLIT_RE.split(text)
+    lines = LINE_SPLIT_RE.split(text or "")
     for ln in lines:
         ln_stripped = ln.strip()
         if not ln_stripped:
             continue
         low = ln_stripped.lower()
 
+        if "blocker" in low:
+            risks.add(ln_stripped)
+            deps.add(ln_stripped)
+
         if any(re.search(p, low) for p in RISK_TERMS):
             risks.add(ln_stripped)
+
+        if "waiting on" in low:
+            deps.add(ln_stripped)
+            norm = _normalize_waiting_on_line(ln_stripped)
+            if norm:
+                deps.add(norm)
+
         if any(re.search(p, low) for p in DEPENDENCY_TERMS):
             deps.add(ln_stripped)
-        # If line ends with '?' or contains open question cues
+
         if any(re.search(p, ln_stripped) for p in OPEN_Q_TERMS) or ln_stripped.endswith("?"):
             open_qs.add(ln_stripped)
+
+    # Whole-text catch-all for 'waiting on ...'
+    text_low = (text or "").lower()
+    for match in re.finditer(r"waiting on\s+(.+?)(?:[\.!\n\r]|$)", text_low, re.IGNORECASE):
+        phrase = f"waiting on {match.group(1).strip()}"
+        deps.add(phrase)
+
+    if "blocker" in text_low:
+        risks.add("Blocker detected.")
+        deps.add("Blocker detected.")
 
     return {
         "risks": sorted(risks),
@@ -257,7 +333,7 @@ def render_md(payload: Dict[str, Any]) -> str:
     title = payload.get("title") or "Team Email Digest"
     period = payload.get("period")
     if period:
-        lines.append(f"# {title} — {period}")
+        lines.append(f"# {title} - {period}")  # ASCII-safe
     else:
         lines.append(f"# {title}")
     lines.append("")
@@ -274,7 +350,7 @@ def render_md(payload: Dict[str, Any]) -> str:
         lines.append("## Actions")
         for a in payload["actions"]:
             due = f" (due {a['due']})" if a.get("due") else ""
-            owner = f" — **{a['owner']}**" if a.get("owner") else ""
+            owner = f" - **{a['owner']}**" if a.get("owner") else ""
             prio = f" _[{a['priority']}]_" if a.get("priority") else ""
             lines.append(f"- {a['title']}{owner}{due}{prio}")
         lines.append("")
@@ -296,7 +372,6 @@ def render_md(payload: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 def render_html(payload: Dict[str, Any]) -> str:
-    # Minimal, clean HTML without external deps
     import html
     def esc(s: str) -> str:
         return html.escape(s, quote=True)
@@ -314,7 +389,7 @@ def render_html(payload: Dict[str, Any]) -> str:
         "ul{margin:8px 0 16px 20px}",
         ".muted{color:#666}",
         "</style>",
-        f"<h1>{title}{(' — ' + period) if period else ''}</h1>",
+        f"<h1>{title}{(' - ' + period) if period else ''}</h1>",
     ]
 
     if payload.get("summary"):
@@ -338,8 +413,8 @@ def render_html(payload: Dict[str, Any]) -> str:
             owner = esc(a.get("owner", "")) if a.get("owner") else ""
             due = esc(a.get("due", "")) if a.get("due") else ""
             prio = esc(a.get("priority", "")) if a.get("priority") else ""
-            meta = " — ".join([p for p in [owner, (f"due {due}" if due else ""), prio] if p])
-            parts.append(f"<li>{t}{(' — ' + meta) if meta else ''}</li>")
+            meta = " - ".join([p for p in [owner, (f"due {due}" if due else ""), prio] if p])
+            parts.append(f"<li>{t}{(' - ' + meta) if meta else ''}</li>")
         parts.append("</ul>")
 
     section_list("Risks", payload.get("risks", []))
@@ -370,30 +445,25 @@ def aggregate_from_sources(
     agg = Aggregates()
 
     for label, text in sources:
-        # Skip file outside time range
         if label != "<stdin>" and not within_range(label, start, end):
             continue
 
         # 1) JSON blocks (authoritative if present)
         objs = extract_json_blocks(text)
         for obj in objs:
-            # Summary
             if "summary" in obj and obj["summary"]:
                 agg.summaries.append(str(obj["summary"]).strip())
 
-            # Decisions
             dec = obj.get("decisions") or []
             if isinstance(dec, list):
                 agg.decisions.extend([str(d).strip() for d in dec if str(d).strip()])
 
-            # Actions
             acts = obj.get("actions") or []
             if isinstance(acts, list):
                 for a in acts:
                     if isinstance(a, dict):
                         agg.actions.append(a)
 
-            # Phase 2 new sections (if logs already contain them)
             for section_key, dest in [
                 ("risks", agg.risks),
                 ("dependencies", agg.dependencies),
@@ -403,13 +473,17 @@ def aggregate_from_sources(
                 if isinstance(vals, list):
                     dest.extend([str(v).strip() for v in vals if str(v).strip()])
 
-        # 2) Heuristics from free text (complements JSON)
+        # 2) Heuristics from free text
         heur = extract_heuristics(text)
         agg.risks.extend(heur["risks"])
         agg.dependencies.extend(heur["dependencies"])
         agg.open_questions.extend(heur["open_questions"])
 
     return agg
+
+def _normalize_owner_key(s: str) -> str:
+    # remove non-alphanumerics and uppercase for resilient matching
+    return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
 
 def build_payload(
     agg: Aggregates,
@@ -418,7 +492,6 @@ def build_payload(
     end: Optional[dt.datetime],
 ) -> Dict[str, Any]:
     title = coalesce(config.get("title"), "Team Email Digest")
-    # Merge/clean
     summary = " ".join(s for s in agg.summaries if s).strip()
     decisions = merge_lists_unique(agg.decisions)
     actions = merge_actions(agg.actions)
@@ -426,18 +499,19 @@ def build_payload(
     deps = merge_lists_unique(agg.dependencies)
     open_qs = merge_lists_unique(agg.open_questions)
 
-    # Optional: apply config-driven label normalizations or owner mappings
+    # Case- & punctuation-insensitive owner mapping
     owner_map = config.get("owner_map", {}) if isinstance(config.get("owner_map", {}), dict) else {}
-    if owner_map:
+    norm_map = {_normalize_owner_key(k): v for k, v in owner_map.items()}
+    if norm_map:
         for a in actions:
-            if a.get("owner") in owner_map:
-                a["owner"] = owner_map[a["owner"]]
+            key_norm = _normalize_owner_key(a.get("owner", ""))
+            if key_norm in norm_map:
+                a["owner"] = norm_map[key_norm]
 
-    # Sort actions by (priority desc, due asc, title)
+    # Sort actions
     prio_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, None: 4, "": 4}
     def due_key(d):
         try:
-            # Accept YYYY-MM-DD
             return dt.datetime.strptime(d, ISO_DATE)
         except Exception:
             return dt.datetime.max
@@ -446,9 +520,9 @@ def build_payload(
 
     period = None
     if start or end:
-        s = start.strftime(ISO_DATE) if start else "…"
-        e = end.strftime(ISO_DATE) if end else "…"
-        period = f"{s} → {e}"
+        s = start.strftime(ISO_DATE) if start else "..."
+        e = end.strftime(ISO_DATE) if end else "..."
+        period = f"{s} to {e}"  # ASCII-safe
 
     payload: Dict[str, Any] = {
         "title": title,
@@ -465,7 +539,7 @@ def build_payload(
 
 
 # -------------------------
-# Main
+# CLI
 # -------------------------
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -506,6 +580,101 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stdout.write(out)
 
     return 0
+
+
+# -------------------------
+# Compatibility helpers for test_team_mock.py
+# -------------------------
+
+def summarize_email(email_payload: str) -> Dict[str, Any]:
+    """
+    Parse a single email's text and return a minimal digest dict.
+    Prefers embedded JSON blocks with 'summary' / 'decisions' / 'actions'.
+    Also merges heuristics to capture blockers/dependencies/questions from free text.
+    """
+    text = email_payload or ""
+
+    # 1) Try regex-based extraction (normal path)
+    objs = extract_json_blocks(text)
+    obj = objs[0] if objs else None
+
+    # 2) Fallback: balanced-brace scan if regex failed
+    if obj is None:
+        obj = _extract_balanced_json(text)
+
+    # Heuristics (always computed and merged)
+    heur = extract_heuristics(text)
+
+    if obj is not None:
+        return {
+            "summary": str(obj.get("summary", "")).strip(),
+            "decisions": [str(d).strip() for d in (obj.get("decisions") or []) if str(d).strip()],
+            "actions": [normalize_action(a) for a in (obj.get("actions") or []) if isinstance(a, dict)],
+            "risks": [str(r).strip() for r in (obj.get("risks") or []) if str(r).strip()] + heur.get("risks", []),
+            "dependencies": [str(d).strip() for d in (obj.get("dependencies") or []) if str(d).strip()] + heur.get("dependencies", []),
+            "open_questions": [str(q).strip() for q in (obj.get("open_questions") or []) if str(q).strip()] + heur.get("open_questions", []),
+        }
+
+    # No JSON → heuristics-only output (plus a naive summary guess)
+    lines = [ln.strip() for ln in text.splitlines()]
+    body_lines = []
+    in_body = False
+    for ln in lines:
+        if in_body:
+            if ln:
+                body_lines.append(ln)
+        elif ln == "" and not in_body:
+            in_body = True  # blank line after headers starts body
+    summary = body_lines[0] if body_lines else ""
+
+    return {
+        "summary": summary,
+        "decisions": [],
+        "actions": [],
+        "risks": heur.get("risks", []),
+        "dependencies": heur.get("dependencies", []),
+        "open_questions": heur.get("open_questions", []),
+    }
+
+def compose_brief(items: List[Dict[str, Any]]) -> str:
+    """Render a compact Markdown brief from per-email items."""
+    out = ["# Team Email Brief", ""]
+    for it in items or []:
+        subject = it.get("subject", "(no subject)")
+        out.append(f"## {subject}")
+        if it.get("summary"):
+            out.append(it["summary"])
+        if it.get("decisions"):
+            out.append("\n**Decisions**")
+            out += [f"- {d}" for d in it["decisions"]]
+        if it.get("actions"):
+            out.append("\n**Actions**")
+            for a in it["actions"]:
+                title = a.get("title", "")
+                due = f" (due {a.get('due')})" if a.get("due") else ""
+                owner = f" - **{a.get('owner')}**" if a.get("owner") else ""
+                prio = f" _[{a.get('priority')}]_" if a.get("priority") else ""
+                out.append(f"- {title}{owner}{due}{prio}")
+        out.append("")
+    return "\n".join(out).strip()
+
+def send_to_slack(text: str) -> bool:
+    """
+    Post the brief to Slack if SLACK_WEBHOOK_URL is set in environment.
+    Returns True on success, False otherwise. Safe no-op if not configured.
+    """
+    url = os.getenv("SLACK_WEBHOOK_URL", "")
+    if not url:
+        return False
+    try:
+        import requests  # type: ignore
+    except Exception:
+        return False
+    try:
+        resp = requests.post(url, json={"text": text}, timeout=10)
+        return 200 <= resp.status_code < 300
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":
