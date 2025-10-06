@@ -37,4 +37,6 @@ docs/_build/
 # Ignore test artifacts
 .coverage
 .pytest_cache/
+people_map.json
+
 
