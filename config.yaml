@@ -1,0 +1,7 @@
+# config.yaml
+title: "Weekly Team Digest"
+owner_map:
+  P: "Priya"
+  AD: "Anuraj Deol"
+  JD: "Jordan"
+# (Add more short→full name mappings as you like)
