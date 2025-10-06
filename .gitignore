@@ -1,0 +1,40 @@
+# Git ignore rules 
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Environment & secrets
+.env
+*.env
+
+# Logs and temporary files
+*.log
+*.out
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build / packaging
+*.egg-info/
+dist/
+build/
+
+# Project-specific
+outputs/
+docs/_build/
+
+# Ignore test artifacts
+.coverage
+.pytest_cache/
+
