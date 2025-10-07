@@ -2,54 +2,78 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "phase2" ]
+    branches: ["main", "phase*", "phase2"]
   pull_request:
-    branches: [ "main", "phase2" ]
+    branches: ["main", "phase2"]
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11"]
+    runs-on: ${{ matrix.os }}
+
+    # Safety: never post to Slack during CI
+    env:
+      SLACK_WEBHOOK_URL: ""
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
+          cache-dependency-path: |
+            requirements.lock.txt
+            requirements.txt
+
+      - name: Show Python version
+        run: python --version
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install dependencies
-        run: >
-          python -c "import os, sys, subprocess;
-for r in ['requirements.lock.txt','requirements.txt']:
-    if os.path.exists(r):
-        print(f'Installing from {r} ...', flush=True)
-        subprocess.check_call([sys.executable,'-m','pip','install','-r',r])
-        break
-else:
-    print('No requirements file found; skipping.', flush=True)"
-
-      - name: Run tests
-        run: pytest -q tests
-
-      - name: Coverage report
-        run: pytest --maxfail=1 --disable-warnings --cov=.
-
-      - name: Safety check Slack (skip if not configured)
+      # ---- Dependency install (Linux) ----
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          python - <<'PY'
-          import os, sys
-          url = os.environ.get("SLACK_WEBHOOK_URL")
-          if not url:
-              print("No Slack webhook set, skipping Slack tests.")
-              sys.exit(0)
-          print("Slack webhook detected, safe to test.")
-          PY
+          set -e
+          if [ -f requirements.lock.txt ]; then
+            pip install -r requirements.lock.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No requirements file found; skipping."
+          fi
+
+      # ---- Dependency install (Windows) ----
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "requirements.lock.txt") {
+            pip install -r requirements.lock.txt
+          } elseif (Test-Path "requirements.txt") {
+            pip install -r requirements.txt
+          } else {
+            Write-Host "No requirements file found; skipping."
+          }
+
+      - name: Install coverage
+        run: python -m pip install coverage
+
+      - name: Run tests with coverage
+        run: |
+          python -m coverage run -m pytest -q tests
+          python -m coverage xml
+
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-${{ matrix.os }}
+          path: coverage.xml
