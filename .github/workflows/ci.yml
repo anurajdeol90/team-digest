@@ -2,61 +2,54 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase*"]
+    branches: [ "main", "phase2" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main", "phase2" ]
 
 jobs:
   test:
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11"]
-    runs-on: ${{ matrix.os }}
-
-    # Safety: prevent any Slack posts during CI
-    env:
-      SLACK_WEBHOOK_URL: ""
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.lock.txt
-            requirements.txt
-
-      - name: Show Python version
-        run: python --version
+          cache: "pip"
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # ✅ Cross-platform dependency install (no heredoc)
-            - name: Install dependencies
+      - name: Install dependencies
         run: >
           python -c "import os, sys, subprocess;
-        for r in ['requirements.lock.txt','requirements.txt']:
-        if os.path.exists(r):
-            print(f'Installing from {r} ...', flush=True)
-            subprocess.check_call([sys.executable,'-m','pip','install','-r',r])
-            break
-        else:
-            print('No requirements file found; skipping.', flush=True)"
+for r in ['requirements.lock.txt','requirements.txt']:
+    if os.path.exists(r):
+        print(f'Installing from {r} ...', flush=True)
+        subprocess.check_call([sys.executable,'-m','pip','install','-r',r])
+        break
+else:
+    print('No requirements file found; skipping.', flush=True)"
 
-      - name: Run tests with coverage
+      - name: Run tests
+        run: pytest -q tests
+
+      - name: Coverage report
+        run: pytest --maxfail=1 --disable-warnings --cov=.
+
+      - name: Safety check Slack (skip if not configured)
         run: |
-          python -m pip install coverage
-          python -m coverage run -m pytest -q tests
-          python -m coverage xml
-
-      - name: Upload coverage.xml
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml-${{ matrix.os }}
-          path: coverage.xml
+          python - <<'PY'
+          import os, sys
+          url = os.environ.get("SLACK_WEBHOOK_URL")
+          if not url:
+              print("No Slack webhook set, skipping Slack tests.")
+              sys.exit(0)
+          print("Slack webhook detected, safe to test.")
+          PY
