@@ -23,7 +23,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -e
           python -m pip install --upgrade pip
           if [ -f requirements.lock.txt ]; then
             echo "Installing from requirements.lock.txt"
@@ -35,4 +37,5 @@ jobs:
           pip install pytest
 
       - name: Run tests
+        shell: bash
         run: pytest -q tests
