@@ -1,38 +1,23 @@
 # Team Digest
 
-Automated team digest generator with Slack posting, scheduling, and CI.
+[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions)
+![Python](https://img.shields.io/badge/python-3.11-blue.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml)
-
----
-
-## 📌 Overview
-
-This project generates a **digest** of team updates, risks, and dependencies.  
-It can run manually or fully automated (Slack + Task Scheduler + GitHub Actions).
+Automated weekly or daily team digest generator.  
+Parses logs/notes into **Markdown, JSON, or HTML digests** and posts to **Slack** automatically.
 
 ---
 
-## 🚀 Features
+## ✨ Features
 
-- Digest generation from team input files
-- Owner map (initials → names)
-- Risks/Blockers tracked separately
-- Markdown output saved in `outputs/`
-- Slack posting via incoming webhook
-- Windows Task Scheduler automation
-- CI pipeline (GitHub Actions) with lockfile support
-- Tests included (pytest)
+- Parse structured or unstructured team notes into digests.
+- Generate outputs in **Markdown**, **JSON**, or **HTML**.
+- Post results to Slack via webhook.
+- Works with **Windows Task Scheduler** for automation.
+- Includes **GitHub Actions CI** to run tests on every push.
 
 ---
 
-## ⚙️ Setup
+## 📦 Installation
 
-### Requirements
-- Windows 11  
-- Python 3.11  
-- GitHub repository  
-
-### Install dependencies
-```bash
-pip install -r requirements.lock.txt
