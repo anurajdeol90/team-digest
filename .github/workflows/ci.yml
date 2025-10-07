@@ -45,3 +45,4 @@ jobs:
             python verify_digest.py
           else
             echo "No tests found. Skipping."
+          fi
