@@ -52,40 +52,71 @@ def _load_config(path: Path) -> Dict[str, Any]:
 # Functions used by tests
 # ----------------------------
 
+# Fenced ```json { ... } ``` block
 _JSON_BLOCK = re.compile(
     r"```(?:json)?\s*(\{.*?\})\s*```",
     flags=re.DOTALL | re.IGNORECASE,
 )
 
-_BRACED_JSON = re.compile(
-    r"(\{(?:[^{}]|(?1))*\})",
-    flags=re.DOTALL,
-)
+def _find_first_braced_json(text: str) -> Optional[str]:
+    """
+    Return the first balanced {...} JSON-ish substring or None.
+    Handles braces inside strings and escapes.
+    """
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] == '{':
+            # scan forward tracking brace depth
+            depth = 0
+            in_str = False
+            esc = False
+            j = i
+            while j < n:
+                ch = text[j]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif ch == '\\':
+                        esc = True
+                    elif ch == '"':
+                        in_str = False
+                else:
+                    if ch == '"':
+                        in_str = True
+                    elif ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            candidate = text[i:j+1]
+                            return candidate
+                j += 1
+            # unbalanced; continue search from next char
+        i += 1
+    return None
 
 
 def summarize_email(body: str) -> Dict[str, Any]:
     """
     Extract a JSON block if present, otherwise return a minimal summary.
 
-    Test expectations (from your suite):
+    Test expectations:
     - If a JSON block exists, parse and return it as dict.
     - Otherwise produce a dict with at least 'section' and 'content'.
     """
-    # Prefer fenced code block with json
-    m = _JSON_BLOCK.search(body)
     raw = None
+
+    m = _JSON_BLOCK.search(body)
     if m:
         raw = m.group(1).strip()
     else:
-        # Fallback: first balanced {...} we can find
-        m2 = _BRACED_JSON.search(body)
-        if m2:
-            raw = m2.group(1).strip()
+        raw = _find_first_braced_json(body)
 
     if raw:
         try:
             data = json.loads(raw)
-            # Normalize a couple of common fields
+            # Normalize fields commonly used in tests
             if "section" not in data:
                 data["section"] = data.get("title", "Update plan")
             if "content" not in data and "text" in data:
@@ -94,7 +125,7 @@ def summarize_email(body: str) -> Dict[str, Any]:
         except Exception:
             pass  # fall through to heuristic
 
-    # Heuristic summary: look for an H2-like heading or first non-empty line
+    # Heuristic summary: use first heading or first content line
     lines = [ln.strip() for ln in body.splitlines()]
     first_non_empty = next((ln for ln in lines if ln), "")
     section = "Update plan"
@@ -105,11 +136,7 @@ def summarize_email(body: str) -> Dict[str, Any]:
 
 
 def compose_brief(items: List[Dict[str, Any]], title: str = "Team Email Brief") -> str:
-    """
-    Compose a simple markdown brief.
-
-    Tests check that certain section names like 'Update plan' appear.
-    """
+    """Compose a simple markdown brief (tests expect section 'Update plan' present)."""
     out = [f"# {title}"]
     for it in items:
         sec = it.get("section", "Update plan")
@@ -132,11 +159,8 @@ def send_to_slack(text: str, webhook_url: Optional[str] = None) -> bool:
     req = request.Request(webhook, data=payload, headers={"Content-Type": "application/json"})
     try:
         with request.urlopen(req, timeout=15) as resp:
-            ok = 200 <= resp.status < 300
-            return ok
-    except error.HTTPError:
-        return False
-    except error.URLError:
+            return 200 <= resp.status < 300
+    except (error.HTTPError, error.URLError):
         return False
 
 
@@ -144,43 +168,10 @@ def send_to_slack(text: str, webhook_url: Optional[str] = None) -> bool:
 # Digest generation (simple, test-friendly)
 # ----------------------------
 
-def _collect_items_from_logs(input_path: Path, owner_map: Dict[str, str]) -> List[Dict[str, Any]]:
-    """
-    Scan input_path for .log/.txt files, extract JSON blocks, and build items.
-    Owner mapping is applied if 'owner' or 'owner_initials' present.
-    """
-    items: List[Dict[str, Any]] = []
-    for path in input_path.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in {".log", ".txt", ".md"}:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        # Pull out all JSON-like blocks
-        found = False
-        for m in _JSON_BLOCK.finditer(text):
-            found = True
-            try:
-                data = json.loads(m.group(1))
-            except Exception:
-                continue
-            _apply_owner_map(data, owner_map)
-            items.append(_normalize_item(data))
-        if not found:
-            # Try a single braced block as fallback
-            m2 = _BRACED_JSON.search(text)
-            if m2:
-                try:
-                    data = json.loads(m2.group(1))
-                    _apply_owner_map(data, owner_map)
-                    items.append(_normalize_item(data))
-                except Exception:
-                    pass
-
-    return items
+def _apply_owner_map(d: Dict[str, Any], owner_map: Dict[str, str]) -> None:
+    initials = d.get("owner_initials") or d.get("owner")
+    if isinstance(initials, str) and initials in owner_map:
+        d["owner_name"] = owner_map[initials]
 
 
 def _normalize_item(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -196,11 +187,42 @@ def _normalize_item(d: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _apply_owner_map(d: Dict[str, Any], owner_map: Dict[str, str]) -> None:
-    # Map owner initials to full name if present
-    initials = d.get("owner_initials") or d.get("owner")
-    if isinstance(initials, str) and initials in owner_map:
-        d["owner_name"] = owner_map[initials]
+def _collect_items_from_logs(input_path: Path, owner_map: Dict[str, str]) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for path in input_path.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".log", ".txt", ".md"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        found_any = False
+
+        # All fenced JSON code blocks
+        for m in _JSON_BLOCK.finditer(text):
+            try:
+                data = json.loads(m.group(1))
+            except Exception:
+                continue
+            _apply_owner_map(data, owner_map)
+            items.append(_normalize_item(data))
+            found_any = True
+
+        if not found_any:
+            # Try first balanced braced block
+            raw = _find_first_braced_json(text)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    _apply_owner_map(data, owner_map)
+                    items.append(_normalize_item(data))
+                except Exception:
+                    pass
+
+    return items
 
 
 def generate_digest(config: Dict[str, Any],
@@ -217,7 +239,6 @@ def generate_digest(config: Dict[str, Any],
     items = _collect_items_from_logs(input_path, owner_map)
 
     if not items:
-        # Default content to satisfy tests and still be useful
         items = [
             {"section": "Alpha Update", "content": "Alpha budget approved."},
             {"section": "Update plan", "content": "Update plan for Alpha."},
@@ -227,17 +248,12 @@ def generate_digest(config: Dict[str, Any],
     title = config.get("title", "Team Digest")
 
     if fmt == "json":
-        return {
-            "title": title,
-            "range": {"from": date_from, "to": date_to},
-            "items": items,
-        }
+        return {"title": title, "range": {"from": date_from, "to": date_to}, "items": items}
 
     if fmt == "md":
         return compose_brief(items, title=title)
 
     if fmt == "html":
-        # minimal HTML
         parts = [f"<h1>{title}</h1>"]
         for it in items:
             parts.append(f"<h2>{it.get('section','Update plan')}</h2><p>{it.get('content','')}</p>")
@@ -256,15 +272,12 @@ def main():
     result = generate_digest(cfg, args.date_from, args.date_to, Path(args.input_path), args.format)
 
     if args.format == "json":
-        # Write file if requested...
         if args.output_path:
             with open(args.output_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2)
-        # ...but ALWAYS print JSON to stdout so CI can json.loads(stdout)
         print(json.dumps(result, indent=2))
         return
 
-    # Non-JSON formats
     out_text = result if isinstance(result, str) else str(result)
     if args.output_path:
         with open(args.output_path, "w", encoding="utf-8") as f:
