@@ -1,0 +1,43 @@
+{
+  "title": "Weekly Team Digest",
+  "period": "2025-10-01 to 2025-10-06",
+  "summary": "Alpha budget approved with extra funding. Beta scope reduced to meet timeline. Gamma feature postponed until Q1 2026.",
+  "decisions": [
+    "Increase Alpha budget by $15k",
+    "Ship MVP without SSO",
+    "Postpone feature release"
+  ],
+  "actions": [
+    {
+      "title": "Update Alpha roadmap",
+      "owner": "Anuraj Deol",
+      "due": "2025-11-01",
+      "priority": "high"
+    },
+    {
+      "title": "Revise Beta roadmap",
+      "owner": "Priya",
+      "due": "2025-10-15",
+      "priority": "medium"
+    },
+    {
+      "title": "Communicate delay to stakeholders",
+      "owner": "Alex",
+      "due": "2025-10-20",
+      "priority": "low"
+    }
+  ],
+  "risks": [
+    "Blocker: waiting on external API keys.",
+    "Risk: low adoption due to postponed release."
+  ],
+  "dependencies": [
+    "Blocker: waiting on external API keys.",
+    "Waiting on external team for API limits.",
+    "Dependency: design review needed from UX group."
+  ],
+  "open_questions": [
+    "Open question: Who will handle QA sign-off?",
+    "Open question: Do we need a customer communication plan?"
+  ]
+}
