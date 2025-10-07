@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,7 +24,13 @@ jobs:
         run: |
           set -e
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements.lock.txt ]; then
+            echo "Installing from requirements.lock.txt"
+            pip install -r requirements.lock.txt
+          elif [ -f requirements.txt ]; then
+            echo "Installing from requirements.txt"
+            pip install -r requirements.txt
+          fi
           pip install pytest
 
       - name: Run tests (pytest or verify script)
@@ -38,4 +45,3 @@ jobs:
             python verify_digest.py
           else
             echo "No tests found. Skipping."
-          fi
