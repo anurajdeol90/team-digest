@@ -9,7 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,16 +19,23 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -e
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest
 
       - name: Run tests (pytest or verify script)
+        shell: bash
         run: |
-          if ls tests/*.py >/dev/null 2>&1 || [ -f pytest.ini ]; then
+          set -e
+          if ls tests/*.py >/dev/null 2>&1 || [ -f pytest.ini ] || [ -f pyproject.toml ]; then
+            echo "Running pytest…"
             python -m pytest -q
           elif [ -f verify_digest.py ]; then
+            echo "Running verify_digest.py…"
             python verify_digest.py
           else
             echo "No tests found. Skipping."
+          fi
