@@ -582,11 +582,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="",
         help="Optional output file path. If omitted, prints to stdout.",
     )
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show version and exit",
+    )
+
     # Extra args used by phase-2 tests (configurable aggregator mode)
     parser.add_argument("--config", default="", help="Path to JSON config (title, owner_map)")
     parser.add_argument("--from", dest="since", default="", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--to", dest="until", default="", help="End date (YYYY-MM-DD)")
     parser.add_argument("--input", dest="input_dir", default="", help="Directory of logs/notes")
+
 
     args = parser.parse_args(argv)
 
