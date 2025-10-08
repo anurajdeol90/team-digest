@@ -3,12 +3,15 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"   # e.g. v0.1.1
+      - "v*.*.*"   # e.g., v0.1.2
+
+# Needed so the workflow can create a GitHub Release
+permissions:
+  contents: write
 
 jobs:
   build-publish:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,17 +35,14 @@ jobs:
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
-          # If you want to test first, uncomment the next line and add a TestPyPI token in PYPI_API_TOKEN:
-          # repository-url: https://test.pypi.org/legacy/
+          skip-existing: true   # prevent "File already exists" on re-runs
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/*
-          if-no-files-found: error
 
-  # Optional: create a GitHub Release and attach artifacts
   github-release:
     needs: build-publish
     runs-on: ubuntu-latest
@@ -58,3 +58,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
