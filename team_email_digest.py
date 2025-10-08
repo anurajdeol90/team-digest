@@ -30,7 +30,7 @@ from typing import Dict, List, Optional
 try:
     from team_digest_version import __version__
 except Exception:
-    __version__ = "0.0.0"  # fallback for dev environments
+    __version__ = "0.0.0"  # fallback only; real version comes from team_digest_version.py
 
 # ---------- Config ----------
 
