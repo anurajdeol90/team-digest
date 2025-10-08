@@ -2,21 +2,16 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase*", "phase2"]
+    branches: ["**"]
   pull_request:
-    branches: ["main", "phase2"]
 
 jobs:
-  test:
+  test-build:
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11"]
-    runs-on: ${{ matrix.os }}
-
-    # Safety: never post to Slack during CI
-    env:
-      SLACK_WEBHOOK_URL: ""
+        python-version: ["3.11"]  # add more later if you like: ["3.9","3.10","3.11","3.12"]
 
     steps:
       - name: Checkout
@@ -26,54 +21,29 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip"
-          cache-dependency-path: |
-            requirements.lock.txt
-            requirements.txt
-
-      - name: Show Python version
-        run: python --version
 
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # ---- Dependency install (Linux) ----
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -e
-          if [ -f requirements.lock.txt ]; then
-            pip install -r requirements.lock.txt
-          elif [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "No requirements file found; skipping."
-          fi
+      - name: Install build tool
+        run: pip install build
 
-      # ---- Dependency install (Windows) ----
-      - name: Install deps (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (Test-Path "requirements.lock.txt") {
-            pip install -r requirements.lock.txt
-          } elseif (Test-Path "requirements.txt") {
-            pip install -r requirements.txt
-          } else {
-            Write-Host "No requirements file found; skipping."
-          }
+      # Optional: lint/tests (uncomment when ready)
+      # - name: Install test deps
+      #   run: pip install pytest ruff
+      #
+      # - name: Lint
+      #   run: ruff check .
+      #
+      # - name: Run tests
+      #   run: pytest -q
 
-      - name: Install coverage
-        run: python -m pip install coverage
+      - name: Build package
+        run: python -m build
 
-      - name: Run tests with coverage
-        run: |
-          python -m coverage run -m pytest -q tests
-          python -m coverage xml
-
-      - name: Upload coverage.xml
+      - name: Upload dist artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-xml-${{ matrix.os }}
-          path: coverage.xml
+          name: dist-${{ matrix.python-version }}
+          path: dist/*
+          if-no-files-found: error

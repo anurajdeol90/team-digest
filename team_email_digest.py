@@ -17,7 +17,7 @@ from pathlib import Path
 try:
     from team_digest_version import __version__
 except Exception:
-    __version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 # ---------------------------
