@@ -1,0 +1,11 @@
+# Core docs
+include README.md
+include LICENSE
+include config.yaml
+
+# Include documentation files if needed
+recursive-include docs *
+
+# Explicitly exclude runtime/generated directories
+prune logs
+prune outputs

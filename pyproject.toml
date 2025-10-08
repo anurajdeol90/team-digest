@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "team-digest"
+# Read version from team_digest_version.py
+dynamic = ["version"]
+description = "Generate team digests from logs/emails, post to Slack, and automate on Windows."
+readme = "README.md"
+requires-python = ">=3.11"
+# Use SPDX string to avoid deprecation warnings
+license = "MIT"
+authors = [{ name = "Your Name" }]
+keywords = ["digest", "automation", "slack", "email", "teams"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+# Runtime dependencies only
+dependencies = [
+  "PyYAML>=6",
+  "python-dateutil>=2.8",
+  "regex>=2023.0",
+  "requests>=2.31",
+  "tqdm>=4.65",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org-or-user/team-digest"
+Issues = "https://github.com/your-org-or-user/team-digest/issues"
+
+# Console entry point
+[project.scripts]
+team-digest = "team_email_digest:main"
+
+[tool.setuptools]
+# Ship a single-module CLI; disable auto discovery to avoid picking up stray dirs
+py-modules = ["team_email_digest", "team_digest_version"]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "team_digest_version.__version__" }

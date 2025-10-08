@@ -1,23 +1,24 @@
 # Team Digest
 
-[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions)
-![Python](https://img.shields.io/badge/python-3.11-blue.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml)
 
-Automated weekly or daily team digest generator.  
-Parses logs/notes into **Markdown, JSON, or HTML digests** and posts to **Slack** automatically.
+Automated team meeting digests: summarize updates, decisions, risks, and actions into Markdown, JSON, or Slack messages.  
+Designed for teams who want clear visibility of meetings, blockers, and follow-ups—without the manual note-taking.
 
 ---
 
 ## ✨ Features
-
-- Parse structured or unstructured team notes into digests.
-- Generate outputs in **Markdown**, **JSON**, or **HTML**.
-- Post results to Slack via webhook.
-- Works with **Windows Task Scheduler** for automation.
-- Includes **GitHub Actions CI** to run tests on every push.
+- Parse logs or model outputs into structured summaries
+- Exports to:
+  - **Markdown** (easy to read & share)
+  - **JSON** (for integrations & automation)
+  - **Slack** (post digests directly to your team channel)
+- Configurable owner mapping (short codes → full names)
+- CI/CD with GitHub Actions for reliability
+- Works on **Windows** and **Linux**
 
 ---
 
-## 📦 Installation
+## 🚀 Quick Start
 
+### 1. Clone the repository
