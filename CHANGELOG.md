@@ -34,5 +34,13 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 \- MIT License and README documentation.
 
+# Changelog
+
+## [0.1.0] - 2025-10-07
+- Phase 1–3: Digest generation, Slack posting, Windows Task Scheduler.
+- Phase 4A: GitHub Actions CI on Ubuntu + Windows, coverage artifact, pip cache.
+- Robust CLI JSON output for CI; safer Slack behavior; output dir auto-create.
+- README + license + config example.
+
 
 
