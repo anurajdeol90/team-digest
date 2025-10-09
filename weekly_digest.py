@@ -117,7 +117,7 @@ def post_with_helper(md_path: Path, title: str) -> None:
 
 
 def main() -> None:
-    start_s, end_s = last_week_window()
+    start_s, end_s = ("1900-01-01", "2100-01-01")
     print(f"Weekly window: {start_s} .. {end_s}", flush=True)
 
     title = f"Weekly Team Digest ({start_s} → {end_s})"
