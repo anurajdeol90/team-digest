@@ -1,39 +1,51 @@
 name: Release
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
+  contents: write          # create GitHub release & upload assets
+  id-token: write          # OIDC for PyPI Trusted Publishing
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11", cache: "pip" }
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Build sdist + wheel
+      - name: Install build tooling
         run: |
-          python -m pip install --upgrade pip build
-          python -m build
-          ls -l dist
+          python -m pip install --upgrade pip
+          pip install build
 
-      - name: Publish to PyPI (Trusted Publishing)
+      - name: Build sdist & wheel
+        run: python -m build
+        env:
+          # Optional but nice for reproducibility
+          PYTHONUTF8: "1"
+
+      # ✅ Publish via Trusted Publishing (no username/password/ token)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true
           skip-existing: true
+          packages-dir: dist
 
+      # Optional: create a GitHub Release and attach the built files
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.whl
             dist/*.tar.gz
-          generate_release_notes: true
