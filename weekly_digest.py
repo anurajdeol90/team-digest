@@ -3,12 +3,14 @@
 Weekly digest runner for CI or local use.
 
 - Computes the previous Monday..Sunday window
-- Runs team_email_digest.py in aggregator mode to generate a Markdown file
-- (Optionally) posts via post_digest.py if SLACK_WEBHOOK_URL is set
+- Runs team_email_digest.py to generate a Markdown digest
+- Saves to outputs/weekly_YYYY-MM-DD_YYYY-MM-DD.md
+- Optionally posts to Slack if SLACK_WEBHOOK_URL is set
 
-CI-safe:
-- Ensures outputs/ exists
-- Prints full stdout/stderr if a child command fails
+Notes:
+- We intentionally pass ONLY config.json (if present). This avoids YAML
+  parsing surprises in environments where the digest script expects JSON.
+- If a logs/ directory exists, we scan that; otherwise we scan the repo root.
 """
 
 from __future__ import annotations
@@ -26,17 +28,18 @@ PYEXE = sys.executable
 
 
 def last_week_window(today: dt.date | None = None) -> tuple[str, str]:
-    """Return previous Monday..Sunday (ISO date strings)."""
+    """Return previous Monday..Sunday as ISO date strings (YYYY-MM-DD)."""
     if today is None:
         today = dt.date.today()
-    dow = today.weekday()                 # 0=Mon..6=Sun
+    # 0=Mon..6=Sun
+    dow = today.weekday()
     start = today - dt.timedelta(days=dow + 7)  # previous Monday
     end = start + dt.timedelta(days=6)          # following Sunday
     return start.isoformat(), end.isoformat()
 
 
 def run_cmd(cmd: list[str], *, cwd: Path | None = None) -> str:
-    """Run a command, echo, capture, and raise with full context on error."""
+    """Run a command, echo it, capture output, and raise with context on error."""
     print("Running:", " ".join(shlex.quote(c) for c in cmd), flush=True)
     p = subprocess.run(
         cmd,
@@ -55,14 +58,19 @@ def run_cmd(cmd: list[str], *, cwd: Path | None = None) -> str:
 
 
 def generate_digest_for_range(start_s: str, end_s: str) -> Path:
-    """Run team_email_digest.py to build the weekly MD into outputs/."""
+    """
+    Run team_email_digest.py to build the weekly Markdown into outputs/.
+    Prefers scanning logs/ if it exists; otherwise scans the repo root.
+    """
     OUT.mkdir(parents=True, exist_ok=True)
 
-    # Prefer YAML, fallback to JSON, or omit if neither exists (defaults used).
-    cfg = REPO / "config.yaml"
-    if not cfg.exists():
-        alt = REPO / "config.json"
-        cfg = alt if alt.exists() else None
+    # Prefer JSON config; if it doesn't exist, omit --config and use defaults.
+    cfg_json = REPO / "config.json"
+    cfg_path: Path | None = cfg_json if cfg_json.exists() else None
+
+    # Prefer logs/ as input if present; otherwise use the repo root.
+    src_dir = REPO / "logs" if (REPO / "logs").exists() else REPO
+    print(f"Input directory: {src_dir}", flush=True)
 
     md_path = OUT / f"weekly_{start_s}_{end_s}.md"
 
@@ -72,11 +80,11 @@ def generate_digest_for_range(start_s: str, end_s: str) -> Path:
         "--from", start_s,
         "--to", end_s,
         "--format", "md",
-        "--input", str(REPO),
+        "--input", str(src_dir),
         "--output", str(md_path),
     ]
-    if cfg is not None:
-        cmd.extend(["--config", str(cfg)])
+    if cfg_path is not None:
+        cmd.extend(["--config", str(cfg_path)])
 
     run_cmd(cmd, cwd=REPO)
     print(f"Digest generated: {md_path}", flush=True)
@@ -84,10 +92,13 @@ def generate_digest_for_range(start_s: str, end_s: str) -> Path:
 
 
 def post_with_helper(md_path: Path, title: str) -> None:
-    """Optional Slack post via post_digest.py if SLACK_WEBHOOK_URL is present."""
+    """
+    Optional Slack post via post_digest.py if SLACK_WEBHOOK_URL is present.
+    If the helper isn't present, we do nothing (no failure in CI).
+    """
     webhook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
     if not webhook:
-        print("No SLACK_WEBHOOK_URL set; skipping post.", flush=True)
+        print("No SLACK_WEBHOOK_URL set; skipping Slack post.", flush=True)
         return
 
     helper = REPO / "post_digest.py"
@@ -97,14 +108,12 @@ def post_with_helper(md_path: Path, title: str) -> None:
             "--file", str(md_path),
             "--title", title,
         ]
-        run_cmd(cmd, cwd=REPO)
+        try:
+            run_cmd(cmd, cwd=REPO)
+        except subprocess.CalledProcessError as e:
+            print("[post_digest] ERROR:", e, flush=True)
     else:
-        import requests  # available in CI per workflow
-        text = md_path.read_text(encoding="utf-8")
-        payload = {"text": f"*{title}*\n```{text}```"}
-        r = requests.post(webhook, json=payload, timeout=10)
-        r.raise_for_status()
-        print("Posted digest via inline webhook.", flush=True)
+        print("post_digest.py not found; skipping Slack post.", flush=True)
 
 
 def main() -> None:
@@ -113,14 +122,7 @@ def main() -> None:
 
     title = f"Weekly Team Digest ({start_s} → {end_s})"
     md_path = generate_digest_for_range(start_s, end_s)
-
-    # Optional Slack post
-    try:
-        post_with_helper(md_path, title)
-    except subprocess.CalledProcessError as e:
-        print("[post_digest] ERROR:", e, flush=True)
-    except Exception as e:
-        print("[post_digest] ERROR:", e, flush=True)
+    post_with_helper(md_path, title)
 
 
 if __name__ == "__main__":
