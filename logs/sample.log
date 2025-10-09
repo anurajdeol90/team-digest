@@ -1,0 +1,32 @@
+--- RAW MODEL JSON for: Alpha ---
+{
+  "summary": "Alpha budget approved with extra funding.",
+  "decisions": ["Increase Alpha budget by $15k"],
+  "actions": [
+    {"title": "Update Alpha roadmap", "owner": "AD", "due": "2025-11-01", "priority": "high"}
+  ]
+}
+Blocker: waiting on external API keys.
+Open question: Who will handle QA sign-off?
+
+--- RAW MODEL JSON for: Beta ---
+{
+  "summary": "Beta scope reduced to meet timeline.",
+  "decisions": ["Ship MVP without SSO"],
+  "actions": [
+    {"title": "Revise Beta roadmap", "owner": "Priya", "due": "2025-10-15", "priority": "medium"}
+  ]
+}
+Waiting on external team for API limits.
+Dependency: design review needed from UX group.
+
+--- RAW MODEL JSON for: Gamma ---
+{
+  "summary": "Gamma feature postponed until Q1 2026.",
+  "decisions": ["Postpone feature release"],
+  "actions": [
+    {"title": "Communicate delay to stakeholders", "owner": "Alex", "due": "2025-10-20", "priority": "low"}
+  ]
+}
+Risk: low adoption due to postponed release.
+Open question: Do we need a customer communication plan?
