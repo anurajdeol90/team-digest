@@ -1,13 +1,21 @@
-name: weekly-digest
+name: Weekly Digest
 
 on:
-  workflow_dispatch:
   schedule:
-    # Every Monday at 14:00 UTC (adjust to your preference)
-    - cron: "0 14 * * 1"
+    # Every Monday 09:00 America/Chicago
+    - cron: '0 14 * * 1'   # 14:00 UTC == 09:00 CT/CDT
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # required to push the generated file back to the repo
+  contents: write
+
+concurrency:
+  group: weekly-digest
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
 
 jobs:
   run:
@@ -15,39 +23,92 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
+
+      - name: Set timezone (America/Chicago)
+        run: |
+          sudo ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime
+          date
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
-      - name: Install deps (minimal)
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install python-dateutil PyYAML requests
+          pip install -r requirements.txt || true
+          pip install .
 
-      - name: Run weekly digest
+      - name: Ensure outputs dir
+        run: mkdir -p outputs
+
+      - name: Select inputs for week window
+        id: pick
+        shell: bash
+        run: |
+          START=$(date -d 'last monday' +%F)
+          END=$(date -d 'last monday +6 days' +%F)
+          echo "start=$START" >> $GITHUB_OUTPUT
+          echo "end=$END" >> $GITHUB_OUTPUT
+          mkdir -p .weekly_inputs
+          # Prefer logs/*.log; otherwise use repo root as fallback
+          FOUND=$(ls logs/*.log 2>/dev/null | wc -l)
+          if [ "$FOUND" -gt 0 ]; then
+            cp logs/*.log .weekly_inputs/
+          else
+            echo "No logs/*.log found; using repo root as input"
+            cp -r . .weekly_inputs/
+          fi
+
+      - name: Generate digest markdown
+        shell: bash
+        run: |
+          python team_email_digest.py \
+            --from "${{ steps.pick.outputs.start }}" \
+            --to "${{ steps.pick.outputs.end }}" \
+            --format md \
+            --input .weekly_inputs \
+            --output "outputs/weekly.md" \
+            --config config.json || true
+          # If config.json missing or YAML used, try yaml
+          if [ ! -s outputs/weekly.md ]; then
+            python team_email_digest.py \
+              --from "${{ steps.pick.outputs.start }}" \
+              --to "${{ steps.pick.outputs.end }}" \
+              --format md \
+              --input .weekly_inputs \
+              --output "outputs/weekly.md" \
+              --config config.yaml || true
+          fi
+          # Final fallback: whole repo, no config
+          if [ ! -s outputs/weekly.md ]; then
+            python team_email_digest.py \
+              --from "${{ steps.pick.outputs.start }}" \
+              --to "${{ steps.pick.outputs.end }}" \
+              --format md \
+              --input . \
+              --output "outputs/weekly.md" || true
+          fi
+          echo "----- outputs/weekly.md -----"
+          sed -n '1,80p' outputs/weekly.md || true
+          echo "-----------------------------"
+
+      - name: Commit artifact to outputs/
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add outputs/weekly.md
+          git commit -m "chore(digest): weekly update" || echo "Nothing to commit"
+          git push
+
+      - name: Post to Slack (optional)
+        if: always() && env.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          python weekly_digest.py
-
-      - name: Commit & push outputs
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/*.md || true
-          git commit -m "chore(digest): weekly update" || echo "No changes to commit"
-          git push || echo "Nothing to push"
-
-      - name: Upload digest artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: weekly-digest
-          path: outputs/*.md
-          if-no-files-found: ignore
+          python post_digest.py \
+            --file outputs/weekly.md \
+            --title "Weekly Team Digest (${{ steps.pick.outputs.start }} → ${{ steps.pick.outputs.end }})" || true
