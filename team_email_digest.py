@@ -5,15 +5,17 @@ Team Digest Generator
 Parses team updates (logs, emails, meeting notes) into structured digests,
 and prints JSON (default) or Markdown.
 
-Recognized sections (case-insensitive, "##" and ":" optional):
-  Summary, Decisions, Actions, Risks, Dependencies, Open Questions
+Modes:
+- Single file / stdin:
+    team-digest [path|-] [--format json|md] [-o OUTPUT]
+    python -m team_email_digest [path|-] [--format json|md] [-o OUTPUT]
 
-Usage (file/stdin):
-  team-digest [path|-] [--format json|md] [-o OUTPUT]
-  python -m team_email_digest [path|-] [--format json|md] [-o OUTPUT]
+- Aggregator (directory) mode:
+    python -m team_email_digest --config CONFIG.json --from YYYY-MM-DD --to YYYY-MM-DD --input LOGS_DIR --format json
 
-Usage (aggregator mode used by CI tests):
-  python -m team_email_digest --config CONFIG.json --from YYYY-MM-DD --to YYYY-MM-DD --input LOGS_DIR --format json
+Notes:
+- If --config is omitted or the file is missing, defaults are used (no crash).
+- --from/--to filter by file modified time (local timezone) when in aggregator mode.
 """
 
 from __future__ import annotations
@@ -25,13 +27,14 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Iterable
+from typing import Dict, List, Optional, Iterable, Tuple
 
 # Version handling: prefer the version module; fall back for dev environments.
 try:
     from team_digest_version import __version__
 except Exception:
     __version__ = "0.0.0"  # fallback only; real version should come from team_digest_version.py
+
 
 # ---------- Configuration ----------
 
@@ -61,7 +64,61 @@ ACTION_KV_RE = re.compile(
 # Phrases that imply dependencies/risks even without headers
 WAITING_PAT = re.compile(r"\b(waiting on|waiting for|blocked by|blocked on)\b", re.I)
 
-# ---------- Helpers ----------
+
+# ---------- Noise filtering (keep junk out of digests) ----------
+
+# Lines like "2025-10-06 16:55:28,092 INFO ..." (or WARNING/ERROR)
+LOG_NOISE_RE = re.compile(
+    r"^\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:[,.:]\d{3})?\s+(INFO|ERROR|WARN(?:ING)?)\b",
+    re.I,
+)
+# Python traceback stack frames like: File "C:\path\weekly_digest.py", line 74, in func
+STACK_FRAME_RE = re.compile(r'^\s*File\s+".+",\s+line\s+\d+,\s*(?:in\s+\w+)?', re.I)
+# Lines showing CLI usage options in square brackets (snippets from argparse help)
+CLI_BRACKETS_RE = re.compile(r'\[--(?:input|config|format|output|from|to|start|end)\b', re.I)
+# Traceback code lines like: main(), run_cmd(cmd), md_path = generate_digest_for_range(...)
+CODE_LINE_RE = re.compile(
+    r'^\s*(?:[A-Za-z_]\w*\s*=\s*)?[A-Za-z_][\w\.]*\s*\([^()]*\)\s*$'
+)
+# Lines that are just caret pointers ^^^^^
+CARET_LINE_RE = re.compile(r'^\s*\^{2,}\s*$')
+
+NOISE_CONTAINS = (
+    "weekly window:",
+    "running:",
+    "digest generated:",
+    "posted digest:",
+    "generator attempt failed:",
+    "done.",
+    "traceback (most recent call last):",
+    "calledprocesserror",
+    "usage: team_email_digest.py",
+    "error: unrecognized arguments",
+    "slack http error",
+    "[stderr]",
+    "subprocess.py",
+    "subprocess.run(",
+)
+
+def _is_noise_line(s: str) -> bool:
+    low = s.strip().lower()
+    if not low:
+        return True
+    return (
+        bool(LOG_NOISE_RE.match(s)) or
+        bool(STACK_FRAME_RE.match(s)) or
+        bool(CLI_BRACKETS_RE.search(s)) or
+        bool(CODE_LINE_RE.match(s)) or
+        bool(CARET_LINE_RE.match(s)) or
+        any(k in low for k in NOISE_CONTAINS)
+    )
+
+
+# ---------- Small helpers ----------
+
+def _vprint(enabled: bool, *args, **kwargs) -> None:
+    if enabled:
+        print(*args, file=sys.stderr, **kwargs)
 
 def _section_key(name: str) -> Optional[str]:
     n = name.strip().lower()
@@ -137,14 +194,16 @@ def _parse_actions(lines: List[str]) -> List[Dict[str, str]]:
             out.append({"title": text})
     return out
 
+
 # ---------- Core parsing ----------
 
 def parse_sections(text: str) -> Dict[str, List[str]]:
     """
-    Parse plain text into canonical sections (all lists of strings).
-    - Recognizes headers and inline trailing content: "Summary: Foo"
-    - Bullets/numbering are normalized
-    - Text before the first header is treated as Summary
+    Parse plain text into canonical sections (lists of strings).
+    - Recognizes headers + inline trailing content: "Summary: Foo"
+    - Bullets/numbering normalized
+    - Text before first header -> Summary
+    - Filters out noisy log/trace lines
     """
     result: Dict[str, List[str]] = {
         "summary": [],
@@ -158,10 +217,10 @@ def parse_sections(text: str) -> Dict[str, List[str]]:
 
     for raw in text.splitlines():
         line = raw.rstrip()
-        if not line.strip():
+        if not line.strip() or _is_noise_line(line):
             continue
 
-        # Robust header detection (works even if regex somehow misses)
+        # Fast-path robust header detection
         low = line.lower().lstrip("#*• ").strip()
         for alias, key in [
             ("summary", "summary"),
@@ -188,7 +247,7 @@ def parse_sections(text: str) -> Dict[str, List[str]]:
                     result[current].append(trailing)
                 break
         else:
-            # Standard header match
+            # Standard regex header
             h = _match_header(line)
             if h:
                 key, trailing = h
@@ -199,7 +258,7 @@ def parse_sections(text: str) -> Dict[str, List[str]]:
                         result[current].append(content)
                 continue
 
-            # Not a header, attribute to current (or Summary by default)
+            # Not a header, attribute to current (or Summary)
             bucket = current or "summary"
             content = _norm_space(_strip_bullet(line))
             if content:
@@ -225,10 +284,11 @@ def build_digest(text: str) -> Dict[str, object]:
     }
     return digest
 
+
 # ---------- Rendering ----------
 
 def render_markdown(d: Dict[str, object]) -> str:
-    """Human-friendly Markdown. Summary becomes bullets if >1 item, else one line."""
+    """Human-friendly Markdown. Summary becomes bullets if >1 item, else a single line."""
     def hdr(name: str) -> str:
         return f"## {name}\n"
     def bullets(items: List[str]) -> str:
@@ -236,7 +296,6 @@ def render_markdown(d: Dict[str, object]) -> str:
 
     out: List[str] = []
 
-    # Summary
     out.append(hdr("Summary"))
     summary: List[str] = d.get("summary", []) or []
     if len(summary) <= 1:
@@ -254,7 +313,6 @@ def render_markdown(d: Dict[str, object]) -> str:
         items: List[str] = d.get(key, []) or []
         out.append(bullets(items) if items else "—\n")
 
-    # Actions (table)
     out.append(hdr("Actions"))
     actions = d.get("actions", []) or []
     if not actions:
@@ -266,6 +324,7 @@ def render_markdown(d: Dict[str, object]) -> str:
                 f"| {a.get('title','')} | {a.get('owner','')} | {a.get('due','')} | {a.get('priority','')} |\n"
             )
     return "".join(out).rstrip() + "\n"
+
 
 # ---------- Compatibility shims expected by tests ----------
 
@@ -318,13 +377,13 @@ def _extract_json_block(text: str) -> dict | None:
         return None
 
 def _heuristic_pullouts(text: str) -> dict:
-    """Pull out risks/dependencies/open_questions from free text cues."""
+    """Pull out risks/dependencies/open_questions from free text cues (skips noise lines)."""
     risks: List[str] = []
     deps: List[str] = []
     oqs: List[str] = []
     for raw in text.splitlines():
         line = raw.strip()
-        if not line:
+        if not line or _is_noise_line(line):
             continue
         low = line.lower()
 
@@ -344,8 +403,6 @@ def _heuristic_pullouts(text: str) -> dict:
             continue
 
         if WAITING_PAT.search(low):
-            # Treat “waiting on/for …” or “blocked by …” as a dependency-ish note.
-            # Strip leading “waiting …” / “blocked …” phrasing to keep the meat.
             cleaned = re.sub(r"^\s*(waiting on|waiting for|blocked by|blocked on)\s*[:\-]?\s*", "", low, flags=re.I)
             deps.append(_norm_space(cleaned if cleaned else line))
 
@@ -358,14 +415,13 @@ def _heuristic_pullouts(text: str) -> dict:
 def summarize_email(text: str) -> dict:
     """
     Return a normalized digest dict from an email-like payload.
-    - If a JSON block is embedded, parse and normalize it.
-    - Otherwise, use header parsing + extra heuristics for risks/deps/oq.
+    - If a JSON block is embedded, parse & normalize it.
+    - Otherwise, use header parsing + heuristics (risks/deps/oq).
     """
     data = _extract_json_block(text)
     if data is None:
         d = build_digest(text)
         pulls = _heuristic_pullouts(text)
-        # Merge heuristic pulls (dedup)
         d["risks"] = _unique_preserve_order(list(d.get("risks", [])) + pulls["risks"])
         d["dependencies"] = _unique_preserve_order(list(d.get("dependencies", [])) + pulls["dependencies"])
         d["open_questions"] = _unique_preserve_order(list(d.get("open_questions", [])) + pulls["open_questions"])
@@ -487,7 +543,8 @@ def send_to_slack(message: str, *, timeout: int = 10) -> bool:
     except Exception:
         return False
 
-# ---------- CLI ----------
+
+# ---------- CLI helpers ----------
 
 def _read_input(path: str) -> str:
     if path == "-" or path == "":
@@ -497,19 +554,65 @@ def _read_input(path: str) -> str:
         raise FileNotFoundError(f"Input file not found: {path}")
     return p.read_text(encoding="utf-8", errors="ignore")
 
-def _load_config(path: str) -> dict:
+def _parse_iso_date(s: str) -> Optional[_dt.date]:
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        return _dt.date.fromisoformat(s)
+    except Exception:
+        return None
+
+def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
+    """
+    Load JSON or YAML (by extension). If missing and not strict: return defaults.
+    If YAML is requested but PyYAML is not installed, warn & return defaults.
+    """
+    defaults = {"title": "Team Digest", "owner_map": {}}
     if not path:
-        return {}
+        _vprint(verbose, "[info] no --config provided; using defaults")
+        return defaults
+
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise ValueError(f"Invalid JSON in config {path}: {e}") from e
+        if strict:
+            raise FileNotFoundError(f"Config file not found: {path}")
+        _vprint(verbose, f"[warn] config not found: {path} — using defaults")
+        return defaults
+
+    text = p.read_text(encoding="utf-8")
+    ext = p.suffix.lower()
+    if ext in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore
+        except Exception:
+            _vprint(verbose, "[warn] PyYAML not installed; cannot parse YAML. Using defaults.")
+            return defaults
+        try:
+            data = yaml.safe_load(text) or {}
+        except Exception as e:
+            if strict:
+                raise ValueError(f"Invalid YAML in config {path}: {e}") from e
+            _vprint(verbose, f"[warn] invalid YAML in {path}: {e} — using defaults")
+            return defaults
+    else:
+        try:
+            data = json.loads(text) or {}
+        except Exception as e:
+            if strict:
+                raise ValueError(f"Invalid JSON in config {path}: {e}") from e
+            _vprint(verbose, f"[warn] invalid JSON in {path}: {e} — using defaults")
+            return defaults
+
+    # normalize
+    cfg = {
+        "title": str(data.get("title") or defaults["title"]),
+        "owner_map": dict(data.get("owner_map") or {}),
+    }
+    return cfg
 
 def _iter_text_files(root: Path) -> Iterable[Path]:
-    # Deterministic order for tests
+    # Deterministic order
     for ext in (".log", ".txt", ".md"):
         for f in sorted(root.rglob(f"*{ext}")):
             if f.is_file():
@@ -527,7 +630,21 @@ def _apply_owner_map(actions: List[dict], owner_map: dict) -> None:
         if key in norm:
             a["owner"] = norm[key]
 
-def _aggregate_from_dir(input_dir: str, cfg: dict) -> dict:
+def _within_range(path: Path, since: Optional[_dt.date], until: Optional[_dt.date]) -> bool:
+    if not since and not until:
+        return True
+    try:
+        ts = path.stat().st_mtime
+        dt = _dt.datetime.fromtimestamp(ts).date()  # local date
+    except Exception:
+        return True
+    if since and dt < since:
+        return False
+    if until and dt > until:
+        return False
+    return True
+
+def _aggregate_from_dir(input_dir: str, cfg: dict, since: Optional[_dt.date], until: Optional[_dt.date], verbose: bool) -> Tuple[dict, int]:
     root = Path(input_dir)
     if not root.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
@@ -542,9 +659,18 @@ def _aggregate_from_dir(input_dir: str, cfg: dict) -> dict:
         "open_questions": [],
     }
 
+    seen_files = 0
     for fp in _iter_text_files(root):
-        content = fp.read_text(encoding="utf-8", errors="ignore")
-        d = summarize_email(content)  # <— use summarize_email so JSON blocks & heuristics work
+        if not _within_range(fp, since, until):
+            _vprint(verbose, f"[skip] {fp} (mtime out of range)")
+            continue
+        try:
+            content = fp.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            _vprint(verbose, f"[warn] cannot read {fp}: {e}")
+            continue
+        d = summarize_email(content)  # JSON blocks & heuristics
+        seen_files += 1
         agg["summary"].extend(d.get("summary", []))
         agg["decisions"].extend(d.get("decisions", []))
         agg["risks"].extend(d.get("risks", []))
@@ -558,7 +684,10 @@ def _aggregate_from_dir(input_dir: str, cfg: dict) -> dict:
 
     _apply_owner_map(agg["actions"], cfg.get("owner_map") or {})
 
-    return agg
+    return agg, seen_files
+
+
+# ---------- CLI ----------
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
@@ -577,10 +706,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="json",
         help="Output format (default: json)",
     )
+    parser.add_argument("-o", "--output", default="", help="Output file path (default: stdout)")
+    parser.add_argument("--config", default="", help="Path to JSON/YAML config (title, owner_map)")
+    parser.add_argument("--from", dest="since", default="", help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--to", dest="until", default="", help="End date (YYYY-MM-DD)")
+    parser.add_argument("--input", dest="input_dir", default="", help="Directory of logs/notes (aggregator mode)")
+    parser.add_argument("--verbose", action="store_true", help="Verbose diagnostics to stderr")
+    parser.add_argument("--fail-on-empty", action="store_true", help="Exit non-zero if no content found")
     parser.add_argument(
-        "-o", "--output",
-        default="",
-        help="Optional output file path. If omitted, prints to stdout.",
+        "--require-config", action="store_true",
+        help="If set, missing/invalid --config is an error (default: soft fallback)."
     )
     parser.add_argument(
         "-V", "--version",
@@ -589,24 +724,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Show version and exit",
     )
 
-    # Extra args used by phase-2 tests (configurable aggregator mode)
-    parser.add_argument("--config", default="", help="Path to JSON config (title, owner_map)")
-    parser.add_argument("--from", dest="since", default="", help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--to", dest="until", default="", help="End date (YYYY-MM-DD)")
-    parser.add_argument("--input", dest="input_dir", default="", help="Directory of logs/notes")
-
-
     args = parser.parse_args(argv)
+    verbose = bool(args.verbose)
 
-    # Aggregator mode if --input is provided
+    # Aggregator mode
     if args.input_dir:
-        cfg = _load_config(args.config) if args.config else {}
-        agg = _aggregate_from_dir(args.input_dir, cfg)
+        cfg = _load_config(args.config, strict=args.require_config, verbose=verbose)
+        since = _parse_iso_date(args.since)
+        until = _parse_iso_date(args.until)
 
+        agg, seen = _aggregate_from_dir(args.input_dir, cfg, since, until, verbose=verbose)
         if args.format == "json":
             payload = json.dumps(agg, indent=2, ensure_ascii=False)
         else:
-            # Convert aggregated dict into a single brief for md rendering
             brief_items = [{
                 "subject": agg.get("title", "Team Digest"),
                 "summary": " ".join(agg.get("summary", [])),
@@ -619,21 +749,26 @@ def main(argv: Optional[List[str]] = None) -> int:
             Path(args.output).write_text(payload, encoding="utf-8")
         else:
             sys.stdout.write(payload)
+
+        # Optional failure on empty
+        empty = (seen == 0) or (
+            not agg["summary"] and not agg["decisions"] and not agg["risks"]
+            and not agg["dependencies"] and not agg["open_questions"] and not agg["actions"]
+        )
+        if args.fail_on_empty and empty:
+            _vprint(verbose, "[fail-on-empty] no content produced")
+            return 2
         return 0
 
-    # Simple single-input mode
+    # Single file / stdin mode
     raw = _read_input(args.path)
     digest = build_digest(raw)
-    if args.format == "json":
-        payload = json.dumps(digest, indent=2, ensure_ascii=False)
-    else:
-        payload = render_markdown(digest)
+    payload = json.dumps(digest, indent=2, ensure_ascii=False) if args.format == "json" else render_markdown(digest)
 
     if args.output:
         Path(args.output).write_text(payload, encoding="utf-8")
     else:
         sys.stdout.write(payload)
-
     return 0
 
 

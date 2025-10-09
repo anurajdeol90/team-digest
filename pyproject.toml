@@ -10,11 +10,10 @@ description = "Generate team digests from logs/emails, post to Slack, and automa
 readme = "README.md"
 requires-python = ">=3.11"
 # Use SPDX string to avoid deprecation warnings
-license = "MIT"
-authors = [{ name = "Your Name" }]
-keywords = ["digest", "automation", "slack", "email", "teams"]
+license = "MIT"  # SPDX string; replaces any table like {text = "..."} or {file = "..."}
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Operating System :: OS Independent",
 ]
 
@@ -37,8 +36,11 @@ team-digest = "team_email_digest:main"
 
 [tool.setuptools]
 # Ship a single-module CLI; disable auto discovery to avoid picking up stray dirs
-py-modules = ["team_email_digest", "team_digest_version"]
-include-package-data = false
+license-files = ["LICENSE"]
+py-modules = ["team_email_digest", "team_digest_version"] 
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "docs", "logs", "outputs"]     
 
 [tool.setuptools.dynamic]
 version = { attr = "team_digest_version.__version__" }
