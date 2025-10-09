@@ -157,8 +157,8 @@ def generate_digest_for_range(start_s: str, end_s: str) -> Path:
     cmd = [
         PYEXE,
         str(REPO / "team_email_digest.py"),
-        "--from", start_s,
-        "--to", end_s,
+        "--from", "1900-01-01",
+        "--to", "2100-01-01",
         "--format", "md",
         "--input", str(TMP),
         "--output", str(md_path),
@@ -199,3 +199,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
