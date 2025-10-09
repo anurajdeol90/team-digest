@@ -1,3 +1,5 @@
+
+[![weekly-digest](https://github.com/anurajdeol90/team-digest/actions/workflows/weekly-digest.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/weekly-digest.yml)
 # Team Digest
 
 [![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml)
@@ -22,3 +24,4 @@ Designed for teams who want clear visibility of meetings, blockers, and follow-u
 ## 🚀 Quick Start
 
 ### 1. Clone the repository
+
