@@ -18,3 +18,7 @@ logs/*.log
 .DS_Store
 Thumbs.db
 Sample.txt
+
+# Track generated weekly digests 
+!outputs/
+!outputs/*.md
