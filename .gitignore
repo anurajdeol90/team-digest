@@ -20,5 +20,9 @@ Thumbs.db
 Sample.txt
 
 # Track generated weekly digests 
+
+# Ignore outputs except weekly artifacts
+outputs/
 !outputs/
-!outputs/*.md
+!outputs/weekly_*.md
+
