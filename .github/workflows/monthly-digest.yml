@@ -60,7 +60,7 @@ jobs:
           OUT="outputs/monthly_${{ steps.window.outputs.label }}.md"
           SRC="temp_input"
           [ -z "$(ls -A temp_input 2>/dev/null)" ] && SRC="${INPUT_DIR:-logs}"
-          team-digest --input "$SRC" --format markdown ${TEAM:+--team "$TEAM"} > "$OUT"
+          team-digest --input "$SRC" --format md ${TEAM:+--team "$TEAM"} > "$OUT"
           echo "OUTFILE=$OUT" >> $GITHUB_ENV
 
       - name: Commit digest to repo
