@@ -1,4 +1,4 @@
-name: Publish Digests to GitHub Pages
+﻿name: Publish Digests to GitHub Pages
 
 on:
   workflow_dispatch:
@@ -22,27 +22,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sets up the Pages build environment (required in some repos)
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Prepare site
         run: |
+          set -e
           mkdir -p public
-          cp -r outputs/* public/ 2>/dev/null || true
-          # Add index listing all digests (newest first)
+          # Copy digests if they exist
+          if [ -d outputs ]; then
+            cp -r outputs/* public/ || true
+          fi
+
+          # Build a simple index.html (newest first)
           {
-            echo "# Team Digests"
-            echo
-            echo "Browse recent digests below."
-            echo
-            for f in $(ls -1 outputs | sort -r); do
-              echo "- [${f}](./${f})"
-            done
-          } > public/index.md
-          # Disable Jekyll processing (serve files as-is)
+            echo "<!doctype html>"
+            echo "<meta charset=\"utf-8\"/>"
+            echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>"
+            echo "<title>Team Digests</title>"
+            echo "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 16px;line-height:1.5}h1{margin-bottom:8px}ul{padding-left:18px}li{margin:6px 0}</style>"
+            echo "<h1>Team Digests</h1>"
+            echo "<p>Browse recent digests below.</p>"
+            echo "<ul>"
+            if [ -d outputs ]; then
+              for f in $(ls -1 outputs 2>/dev/null | sort -r); do
+                echo "<li><a href=\"./$f\">$f</a></li>"
+              done
+            else
+              echo "<li>No digests found yet.</li>"
+            fi
+            echo "</ul>"
+          } > public/index.html
+
+          # Disable Jekyll (serve files as-is)
           touch public/.nojekyll
+
+          echo "=== Public dir contents ==="
+          find public -maxdepth 1 -type f -printf "%f\n" | sort
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
+          name: github-pages  # explicit artifact name
 
   deploy:
     needs: build
