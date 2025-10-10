@@ -22,20 +22,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Sets up the Pages build environment (required in some repos)
+      # Sets up the Pages build environment
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Prepare site
+      - name: Install Python Markdown library
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install markdown
+
+      - name: Prepare site (copy, render .md -> .html, build index)
         run: |
           set -e
           mkdir -p public
-          # Copy digests if they exist
+
+          # 1) Copy original markdown (optional: keep raw downloads)
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
 
-          # Build a simple index.html (newest first)
+          # 2) Convert each .md -> .html (with a simple stylesheet)
+          python3 - <<'PY'
+import os, glob, html, pathlib
+from markdown import markdown
+
+os.makedirs('public', exist_ok=True)
+for md_path in glob.glob('outputs/*.md'):
+    with open(md_path, 'r', encoding='utf-8') as f:
+        body = markdown(f.read(), extensions=['tables'])
+    name = os.path.basename(md_path)
+    title = name
+    html_name = name[:-3] + '.html'
+    head = """<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+<title>{}</title>
+""".format(html.escape(title))
+    with open(os.path.join('public', html_name), 'w', encoding='utf-8') as out:
+        out.write(head + "<h1>{}</h1>\n".format(html.escape(title)) + body)
+PY
+
+          # 3) Build index linking to HTML (newest first); also link raw .md
           {
             echo "<!doctype html>"
             echo "<meta charset=\"utf-8\"/>"
@@ -46,8 +74,9 @@ jobs:
             echo "<p>Browse recent digests below.</p>"
             echo "<ul>"
             if [ -d outputs ]; then
-              for f in $(ls -1 outputs 2>/dev/null | sort -r); do
-                echo "<li><a href=\"./$f\">$f</a></li>"
+              for f in $(ls -1 outputs/*.md 2>/dev/null | xargs -n1 basename | sort -r); do
+                html="\${f%.md}.html"
+                echo "<li><a href=\"./$html\">$f</a> &nbsp; <small>(<a href=\"./$f\">raw .md</a>)</small></li>"
               done
             else
               echo "<li>No digests found yet.</li>"
@@ -55,17 +84,17 @@ jobs:
             echo "</ul>"
           } > public/index.html
 
-          # Disable Jekyll (serve files as-is)
+          # Serve files as-is (no Jekyll)
           touch public/.nojekyll
 
-          echo "=== Public dir contents ==="
-          find public -maxdepth 1 -type f -printf "%f\n" | sort
+          echo "=== public listing ==="
+          ls -la public
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
-          name: github-pages  # explicit artifact name
+          name: github-pages
 
   deploy:
     needs: build
