@@ -81,11 +81,16 @@ jobs:
           team-digest --input "$SRC" --format md > "$OUT"
           echo "OUTFILE=$OUT" >> $GITHUB_ENV
 
-      - name: Update local main (rebase)
+      - name: Sync with remote (rebase safely)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
+           git config user.name "github-actions[bot]"
+           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            # Stash any new/changed files (e.g., outputs/, temp_input/)
+           git stash push -u -m "digest-pre-rebase" || true
+            # Rebase onto the latest main
+           git pull --rebase origin main
+            # Restore our changes so we can commit them
+           git stash pop || true
 
       - name: Commit digest to repo
         uses: stefanzweifel/git-auto-commit-action@v5
