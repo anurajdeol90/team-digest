@@ -59,36 +59,23 @@ jobs:
           IN="${INPUT_DIR:-logs}"
           mkdir -p "$IN"
 
-      - name: Collect inputs into temp_input/
-        run: |
-          set -e
-          IN="${INPUT_DIR:-logs}"
-          mkdir -p temp_input
-          if [ -d "$IN" ]; then
-            find "$IN" -type f -newermt "${{ steps.window.outputs.start }}" ! -newermt "${{ steps.window.outputs.end }}" -print0 \
-              | xargs -0 -I{} cp "{}" "temp_input/$(basename "{}")" || true
-          fi
-          echo "Collected $(ls -1 temp_input 2>/dev/null | wc -l) files"
-
       - name: Generate digest markdown
         run: |
           mkdir -p outputs
           OUT="outputs/daily_${{ steps.window.outputs.label }}.md"
-          SRC="temp_input"
-          [ -z "$(ls -A temp_input 2>/dev/null)" ] && SRC="${INPUT_DIR:-logs}"
-          team-digest --input "$SRC" --format md > "$OUT"
+          team-digest --input "${INPUT_DIR:-logs}" --format md \
+            --from "${{ steps.window.outputs.start }}" \
+            --to   "${{ steps.window.outputs.end }}" > "$OUT"
           echo "OUTFILE=$OUT" >> $GITHUB_ENV
 
       - name: Sync with remote (rebase safely)
         run: |
-           git config user.name "github-actions[bot]"
-           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            # Stash any new/changed files (e.g., outputs/, temp_input/)
-           git stash push -u -m "digest-pre-rebase" || true
-            # Rebase onto the latest main
-           git pull --rebase origin main
-            # Restore our changes so we can commit them
-           git stash pop || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git stash push -u -m "digest-pre-rebase" || true
+          git pull --rebase origin main
+          git stash pop || true
+          git status --porcelain
 
       - name: Commit digest to repo
         uses: stefanzweifel/git-auto-commit-action@v5
