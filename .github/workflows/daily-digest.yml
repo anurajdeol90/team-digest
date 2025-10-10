@@ -1,0 +1,102 @@
+name: Daily Digest (weekdays 9am CT)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 9am CDT (UTC-5) → 14:00 UTC, Mon–Fri
+    - cron: "0 14 * * 1-5"
+    # 9am CST (UTC-6) → 15:00 UTC, Mon–Fri
+    - cron: "0 15 * * 1-5"
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
+      TEAM: ${{ vars.DIGEST_TEAM }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      DIGEST_EMAIL_FROM: ${{ secrets.DIGEST_EMAIL_FROM }}
+      DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install team-digest
+        run: |
+          python -m pip install --upgrade pip
+          pip install "team-digest>=0.1.10"
+
+      - name: Compute yesterday window (America/Chicago)
+        id: window
+        run: |
+          # Derive yesterday in Chicago, then convert to absolute timestamps
+          TZ=America/Chicago date
+          START_DATE=$(TZ=America/Chicago date -d "yesterday 00:00" +%F' '%T)
+          END_DATE=$(TZ=America/Chicago date -d "yesterday 23:59:59" +%F' '%T)
+          echo "start=$START_DATE" >> $GITHUB_OUTPUT
+          echo "end=$END_DATE" >> $GITHUB_OUTPUT
+
+      - name: Collect inputs into temp_input/
+        run: |
+          set -e
+          IN="${INPUT_DIR:-logs}"
+          mkdir -p temp_input
+          # Copy files modified within the window into temp_input (flat)
+          find "$IN" -type f -newermt "${{ steps.window.outputs.start }}" ! -newermt "${{ steps.window.outputs.end }}" -print0 \
+            | xargs -0 -I{} cp "{}" "temp_input/$(basename "{}")" || true
+          echo "Collected $(ls -1 temp_input | wc -l) files"
+
+      - name: Generate digest markdown
+        run: |
+          mkdir -p outputs
+          OUT="outputs/daily_$(TZ=America/Chicago date -d 'yesterday' +%F).md"
+          # Use temp_input if it has files; else fall back to INPUT_DIR
+          SRC="temp_input"
+          [ -z "$(ls -A temp_input 2>/dev/null)" ] && SRC="${INPUT_DIR:-logs}"
+          # Owner mapping & config are assumed present already in repo if you use them.
+          team-digest --input "$SRC" --format markdown ${TEAM:+--team "$TEAM"} > "$OUT"
+          echo "OUTFILE=$OUT" >> $GITHUB_ENV
+
+      - name: Commit digest to repo
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(digest): add ${OUTFILE##*/}"
+          file_pattern: outputs/*.md
+
+      - name: Post to Slack (optional)
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": ":newspaper: Daily digest for $(TZ=America/Chicago date -d 'yesterday' +%F) is ready.\n${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Email digest (optional)
+        if: ${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Daily Team Digest ($(TZ=America/Chicago date -d 'yesterday' +%F))"
+          from: ${{ secrets.DIGEST_EMAIL_FROM }}
+          to: ${{ secrets.DIGEST_EMAIL_TO }}
+          secure: true
+          convert_markdown: true
+          body: |
+            Daily digest is attached and committed to the repo.
+            ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}
+          attachments: ${{ env.OUTFILE }}
