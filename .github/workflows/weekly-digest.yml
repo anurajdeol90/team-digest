@@ -1,10 +1,12 @@
-name: Weekly Digest
+name: Weekly Digest (Mondays 9am CT)
 
 on:
+  workflow_dispatch:
   schedule:
-    # Every Monday 09:00 America/Chicago
-    - cron: '0 14 * * 1'   # 14:00 UTC == 09:00 CT/CDT
-  workflow_dispatch: {}
+    # 9am CDT (UTC-5) → 14:00 UTC, Mondays
+    - cron: "0 14 * * 1"
+    # 9am CST (UTC-6) → 15:00 UTC, Mondays
+    - cron: "0 15 * * 1"
 
 permissions:
   contents: write
@@ -13,102 +15,105 @@ concurrency:
   group: weekly-digest
   cancel-in-progress: true
 
-env:
-  PYTHONUTF8: "1"
-  PYTHONIOENCODING: "utf-8"
-
 jobs:
-  run:
+  weekly:
     runs-on: ubuntu-latest
+    env:
+      INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
+      TEAM: ${{ vars.DIGEST_TEAM }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      DIGEST_EMAIL_FROM: ${{ secrets.DIGEST_EMAIL_FROM }}
+      DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Set timezone (America/Chicago)
-        run: |
-          sudo ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime
-          date
-
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
-      - name: Install deps
+      - name: Install team-digest
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install .
+          pip install "team-digest>=0.1.10"
 
-      - name: Ensure outputs dir
-        run: mkdir -p outputs
-
-      - name: Select inputs for week window
-        id: pick
-        shell: bash
+      - name: Compute previous week window (America/Chicago)
+        id: window
         run: |
-          START=$(date -d 'last monday' +%F)
-          END=$(date -d 'last monday +6 days' +%F)
-          echo "start=$START" >> $GITHUB_OUTPUT
-          echo "end=$END" >> $GITHUB_OUTPUT
-          mkdir -p .weekly_inputs
-          # Prefer logs/*.log; otherwise use repo root as fallback
-          FOUND=$(ls logs/*.log 2>/dev/null | wc -l)
-          if [ "$FOUND" -gt 0 ]; then
-            cp logs/*.log .weekly_inputs/
-          else
-            echo "No logs/*.log found; using repo root as input"
-            cp -r . .weekly_inputs/
-          fi
+          # Previous week: Monday 00:00 to Sunday 23:59:59 in CT
+          THIS_MONDAY=$(TZ=America/Chicago date -d "monday this week 00:00" +%F' '%T)
+          START_DATE=$(TZ=America/Chicago date -d "$THIS_MONDAY -7 days" +%F' '%T)
+          END_DATE=$(TZ=America/Chicago date -d "$THIS_MONDAY -1 second" +%F' '%T)
+          LABEL=$(TZ=America/Chicago date -d "$START_DATE" +%G-%V)  # ISO year-week
+          echo "start=$START_DATE" >> $GITHUB_OUTPUT
+          echo "end=$END_DATE" >> $GITHUB_OUTPUT
+          echo "label=$LABEL" >> $GITHUB_OUTPUT
+
+      - name: Collect inputs into temp_input/
+        run: |
+          set -e
+          IN="${INPUT_DIR:-logs}"
+          mkdir -p temp_input
+          find "$IN" -type f -newermt "${{ steps.window.outputs.start }}" ! -newermt "${{ steps.window.outputs.end }}" -print0 \
+            | xargs -0 -I{} cp "{}" "temp_input/$(basename "{}")" || true
+          echo "Collected $(ls -1 temp_input 2>/dev/null | wc -l) files"
 
       - name: Generate digest markdown
-        shell: bash
         run: |
-          python team_email_digest.py \
-            --from "${{ steps.pick.outputs.start }}" \
-            --to "${{ steps.pick.outputs.end }}" \
-            --format md \
-            --input .weekly_inputs \
-            --output "outputs/weekly.md" \
-            --config config.json || true
-          # If config.json missing or YAML used, try yaml
-          if [ ! -s outputs/weekly.md ]; then
-            python team_email_digest.py \
-              --from "${{ steps.pick.outputs.start }}" \
-              --to "${{ steps.pick.outputs.end }}" \
-              --format md \
-              --input .weekly_inputs \
-              --output "outputs/weekly.md" \
-              --config config.yaml || true
-          fi
-          # Final fallback: whole repo, no config
-          if [ ! -s outputs/weekly.md ]; then
-            python team_email_digest.py \
-              --from "${{ steps.pick.outputs.start }}" \
-              --to "${{ steps.pick.outputs.end }}" \
-              --format md \
-              --input . \
-              --output "outputs/weekly.md" || true
-          fi
-          echo "----- outputs/weekly.md -----"
-          sed -n '1,80p' outputs/weekly.md || true
-          echo "-----------------------------"
+          mkdir -p outputs
+          OUT="outputs/weekly_${{ steps.window.outputs.label }}.md"
+          SRC="temp_input"
+          [ -z "$(ls -A temp_input 2>/dev/null)" ] && SRC="${INPUT_DIR:-logs}"
+          team-digest --input "$SRC" --format md ${TEAM:+--team "$TEAM"} > "$OUT"
+          echo "OUTFILE=$OUT" >> $GITHUB_ENV
 
-      - name: Commit artifact to outputs/
-        if: always()
+      - name: Update local main (rebase)
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add outputs/weekly.md
-          git commit -m "chore(digest): weekly update" || echo "Nothing to commit"
-          git push
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
+      - name: Commit digest to repo
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(digest): add ${{ env.OUTFILE }}"
+          file_pattern: outputs/*.md
+          # push_options: '--force-with-lease'   # Optional safety net if collisions happen
 
       - name: Post to Slack (optional)
-        if: always() && env.SLACK_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": ":calendar: Weekly digest for ${{ steps.window.outputs.label }} is ready.\n${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}"
+            }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          python post_digest.py \
-            --file outputs/weekly.md \
-            --title "Weekly Team Digest (${{ steps.pick.outputs.start }} → ${{ steps.pick.outputs.end }})" || true
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Email digest (optional)
+        if: "${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}"
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Weekly Team Digest (${{ steps.window.outputs.label }})"
+          from: ${{ secrets.DIGEST_EMAIL_FROM }}
+          to: ${{ secrets.DIGEST_EMAIL_TO }}
+          secure: true
+          convert_markdown: true
+          body: |
+            Weekly digest is attached and committed to the repo.
+            ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}
+          attachments: ${{ env.OUTFILE }}
