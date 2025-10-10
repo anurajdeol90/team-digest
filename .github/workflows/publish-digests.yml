@@ -24,65 +24,62 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Install Python Markdown library
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install markdown
-
-      - name: Build site (copy, render md->html, build index)
+      - name: Build site (copy md, add viewer, build index)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
 
-          # 1) Copy digests (keep raw .md for download)
+          # 1) Copy digests if any (keep raw .md files)
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
 
-          # 2) Render Markdown to HTML using a standalone script (safe for YAML)
-          cat > render_md.py << 'PY'
-import os, glob, html
-from markdown import markdown
+          # 2) Create a simple Markdown viewer (client-side render with marked.js)
+          : > public/viewer.html
+          echo '<!doctype html>'                                   >> public/viewer.html
+          echo '<meta charset="utf-8">'                            >> public/viewer.html
+          echo '<meta name="viewport" content="width=device-width, initial-scale=1">' >> public/viewer.html
+          echo '<title>Digest Viewer</title>'                      >> public/viewer.html
+          echo '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">' >> public/viewer.html
+          echo '<main id="app"><p>Loading…</p></main>'             >> public/viewer.html
+          echo '<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>' >> public/viewer.html
+          echo '<script>'                                           >> public/viewer.html
+          echo '  const params = new URLSearchParams(location.search);' >> public/viewer.html
+          echo '  const file = params.get("file");'                 >> public/viewer.html
+          echo '  const app = document.getElementById("app");'      >> public/viewer.html
+          echo '  if (!file) { app.innerHTML = "<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>"; }' >> public/viewer.html
+          echo '  else fetch(file).then(r => {'                     >> public/viewer.html
+          echo '    if (!r.ok) throw new Error("Failed to load "+file);' >> public/viewer.html
+          echo '    return r.text();'                               >> public/viewer.html
+          echo '  }).then(md => {'                                  >> public/viewer.html
+          echo '    document.title = file + " — Team Digest";'      >> public/viewer.html
+          echo '    app.innerHTML = marked.parse(md);'              >> public/viewer.html
+          echo '  }).catch(e => {'                                  >> public/viewer.html
+          echo '    app.innerHTML = "<h1>Error</h1><pre>"+e+"</pre>";' >> public/viewer.html
+          echo '  });'                                              >> public/viewer.html
+          echo '</script>'                                          >> public/viewer.html
 
-os.makedirs('public', exist_ok=True)
-for md_path in glob.glob('outputs/*.md'):
-    with open(md_path, 'r', encoding='utf-8') as f:
-        body = markdown(f.read(), extensions=['tables'])
-    name = os.path.basename(md_path)
-    title = name
-    html_name = name[:-3] + '.html'
-    head = """<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-<title>{}</title>
-""".format(html.escape(title))
-    with open(os.path.join('public', html_name), 'w', encoding='utf-8') as out:
-        out.write(head + "<h1>{}</h1>\n".format(html.escape(title)) + body)
-PY
-          python3 render_md.py
+          # 3) Build index linking to viewer.html (newest first) + raw .md link
+          : > public/index.html
+          echo '<!doctype html>'                                    >> public/index.html
+          echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' >> public/index.html
+          echo '<title>Team Digests</title>'                        >> public/index.html
+          echo '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">' >> public/index.html
+          echo '<h1>Team Digests</h1>'                              >> public/index.html
+          echo '<p>Browse recent digests below.</p>'                >> public/index.html
+          echo '<ul>'                                               >> public/index.html
+          if ls outputs/*.md >/dev/null 2>&1; then
+            for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
+              html="viewer.html?file=$f"
+              echo "<li><a href=\"./$html\">$f</a> &nbsp; <small>(<a href=\"./$f\">raw .md</a>)</small></li>" >> public/index.html
+            done
+          else
+            echo '<li>No digests found yet.</li>'                   >> public/index.html
+          fi
+          echo '</ul>'                                              >> public/index.html
 
-          # 3) Build index linking to HTML (newest first) + raw .md
-          {
-            echo '<!doctype html>'
-            echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
-            echo '<title>Team Digests</title>'
-            echo '<h1>Team Digests</h1>'
-            echo '<p>Browse recent digests below.</p>'
-            echo '<ul>'
-            if ls outputs/*.md >/dev/null 2>&1; then
-              for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
-                htmlfile="${f%.md}.html"
-                echo "<li><a href=\"./$htmlfile\">$f</a> &nbsp; <small>(<a href=\"./$f\">raw .md</a>)</small></li>"
-              done
-            else
-              echo '<li>No digests found yet.</li>'
-            fi
-            echo '</ul>'
-          } > public/index.html
-
-          # Serve files as-is and show contents
+          # Serve files as-is and print listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
