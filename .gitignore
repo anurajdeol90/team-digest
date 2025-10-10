@@ -26,3 +26,6 @@ outputs/
 !outputs/
 !outputs/weekly_*.md
 
+# Ignore real logs but keep placeholder
+logs/*
+!logs/.gitkeep
