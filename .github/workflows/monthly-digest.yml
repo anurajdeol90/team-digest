@@ -8,6 +8,13 @@ on:
     # 9am CST (UTC-6) → 15:00 UTC on day 1
     - cron: "0 15 1 * *"
 
+permissions:
+  contents: write
+
+concurrency:
+  group: monthly-digest
+  cancel-in-progress: true
+
 jobs:
   monthly:
     runs-on: ubuntu-latest
@@ -23,6 +30,10 @@ jobs:
       DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,7 +48,6 @@ jobs:
       - name: Compute previous calendar month window (America/Chicago)
         id: window
         run: |
-          # Example if today is 2025-10-01, we want 2025-09-01..2025-09-30 23:59:59 CT
           START_DATE=$(TZ=America/Chicago date -d "$(TZ=America/Chicago date +%Y-%m-01) -1 month" +%F' 00:00:00')
           END_DATE=$(TZ=America/Chicago date -d "$(TZ=America/Chicago date +%Y-%m-01) -1 second" +%F' %T')
           LABEL=$(TZ=America/Chicago date -d "$(TZ=America/Chicago date +%Y-%m-01) -1 month" +%Y-%m)
@@ -52,7 +62,7 @@ jobs:
           mkdir -p temp_input
           find "$IN" -type f -newermt "${{ steps.window.outputs.start }}" ! -newermt "${{ steps.window.outputs.end }}" -print0 \
             | xargs -0 -I{} cp "{}" "temp_input/$(basename "{}")" || true
-          echo "Collected $(ls -1 temp_input | wc -l) files"
+          echo "Collected $(ls -1 temp_input 2>/dev/null | wc -l) files"
 
       - name: Generate digest markdown
         run: |
@@ -63,11 +73,18 @@ jobs:
           team-digest --input "$SRC" --format md ${TEAM:+--team "$TEAM"} > "$OUT"
           echo "OUTFILE=$OUT" >> $GITHUB_ENV
 
+      - name: Update local main (rebase)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
       - name: Commit digest to repo
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(digest): add ${OUTFILE##*/}"
+          commit_message: "chore(digest): add ${{ env.OUTFILE }}"
           file_pattern: outputs/*.md
+          # push_options: '--force-with-lease'   # Optional safety net if collisions happen
 
       - name: Post to Slack (optional)
         if: ${{ env.SLACK_WEBHOOK_URL != '' }}
@@ -82,7 +99,7 @@ jobs:
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
       - name: Email digest (optional)
-        if: ${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}
+        if: "${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}"
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_SERVER }}
