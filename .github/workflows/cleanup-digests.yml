@@ -1,0 +1,37 @@
+name: Cleanup old digests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 0"   # Sundays 06:00 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-digests
+  cancel-in-progress: true
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Remove digests older than 90 days
+        run: |
+          mkdir -p outputs
+          # List files to be deleted (for log visibility)
+          find outputs -type f -name "*.md" -mtime +90 -print || true
+          # Delete them
+          find outputs -type f -name "*.md" -mtime +90 -delete || true
+
+      - name: Commit cleanup (if any)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(cleanup): prune digests older than 90 days"
+          file_pattern: outputs/*.md
