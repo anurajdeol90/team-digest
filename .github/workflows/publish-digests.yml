@@ -13,7 +13,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-publish
   cancel-in-progress: true
 
 jobs:
@@ -21,83 +21,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
 
-      # Required by Pages
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      # Markdown renderer for md -> html
-      - name: Install Python Markdown library
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install markdown
-
-      # Copy outputs/, render each .md to .html, build index.html
-      - name: Prepare site (copy, render md->html, build index)
+      - name: Build site (index + copy digests)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
-
-          # 1) Copy original markdown (keep for download)
+          # Copy digests if any
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
-
-          # 2) Render Markdown to HTML using a short Python script (safer than heredocs)
-          cat > render_md.py << 'PY'
-import os, glob, html
-from markdown import markdown
-
-os.makedirs('public', exist_ok=True)
-for md_path in glob.glob('outputs/*.md'):
-    with open(md_path, 'r', encoding='utf-8') as f:
-        body = markdown(f.read(), extensions=['tables'])
-    name = os.path.basename(md_path)
-    title = name
-    html_name = name[:-3] + '.html'
-    head = """<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-<title>{}</title>
-""".format(html.escape(title))
-    with open(os.path.join('public', html_name), 'w', encoding='utf-8') as out:
-        out.write(head + "<h1>{}</h1>\n".format(html.escape(title)) + body)
-PY
-          python3 render_md.py
-
-          # 3) Build index linking to HTML (newest first) + raw .md
+          # Build a minimal index linking to .md files (newest first)
           {
-            echo "<!doctype html>"
-            echo "<meta charset=\"utf-8\"/>"
-            echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>"
-            echo "<title>Team Digests</title>"
-            echo "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 16px;line-height:1.5}h1{margin-bottom:8px}ul{padding-left:18px}li{margin:6px 0}</style>"
-            echo "<h1>Team Digests</h1>"
-            echo "<p>Browse recent digests below.</p>"
-            echo "<ul>"
-            if [ -d outputs ]; then
-              for f in $(ls -1 outputs/*.md 2>/dev/null | xargs -n1 basename | sort -r); do
-                html="${f%.md}.html"
-                echo "<li><a href=\"./$html\">$f</a> &nbsp; <small>(<a href=\"./$f\">raw .md</a>)</small></li>"
+            echo '<!doctype html>'
+            echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            echo '<title>Team Digests</title>'
+            echo '<h1>Team Digests</h1>'
+            echo '<p>Browse recent digests below.</p>'
+            echo '<ul>'
+            if ls outputs/*.md >/dev/null 2>&1; then
+              for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
+                echo "<li><a href=\"./$f\">$f</a></li>"
               done
             else
-              echo "<li>No digests found yet.</li>"
+              echo '<li>No digests found yet.</li>'
             fi
-            echo "</ul>"
+            echo '</ul>'
           } > public/index.html
-
-          # Serve files as-is (no Jekyll) and show final contents
           touch public/.nojekyll
-          echo "=== public listing ==="
-          ls -la public
+          echo "=== public listing ==="; ls -la public
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: public
-          name: github-pages
 
   deploy:
     needs: build
