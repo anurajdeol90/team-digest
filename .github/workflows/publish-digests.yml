@@ -22,15 +22,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Required by Pages
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      # Markdown renderer for md -> html
       - name: Install Python Markdown library
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install markdown
 
-      - name: "Prepare site (copy, render .md -> .html, build index)"
+      # Copy outputs/, render each .md to .html, build index.html
+      - name: Prepare site (copy, render md->html, build index)
         shell: bash
         run: |
           set -euo pipefail
@@ -41,8 +44,8 @@ jobs:
             cp -r outputs/* public/ || true
           fi
 
-          # 2) Convert each .md -> .html with a simple stylesheet
-          python3 - <<'PY'
+          # 2) Render Markdown to HTML using a short Python script (safer than heredocs)
+          cat > render_md.py << 'PY'
 import os, glob, html
 from markdown import markdown
 
@@ -62,6 +65,7 @@ for md_path in glob.glob('outputs/*.md'):
     with open(os.path.join('public', html_name), 'w', encoding='utf-8') as out:
         out.write(head + "<h1>{}</h1>\n".format(html.escape(title)) + body)
 PY
+          python3 render_md.py
 
           # 3) Build index linking to HTML (newest first) + raw .md
           {
