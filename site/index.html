@@ -2,43 +2,35 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Team Digests</title>
-
-<!-- Themeable Water.css -->
-<link id="theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.min.css" disabled>
-<link id="theme-dark"  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/dark.min.css" disabled>
-
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
 <style>
-  :root { --gap: .6rem; }
-  .container { max-width: 1000px; margin: 0 auto; padding: 1.25rem; }
-  .muted { opacity: .75 }
-  .grid { display: grid; gap: var(--gap); }
-  .row { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap }
-  .pill { font-size:.85rem; padding:.15rem .6rem; border:1px solid currentColor; border-radius:999px; opacity:.75 }
-  .list { margin:.25rem 0 1rem; padding-left:1.1rem }
-  .spacer { flex: 1 }
-  .toolbar { display:flex; align-items:center; gap: var(--gap); margin:.5rem 0 1rem }
-  button.theme { font-size: .9rem; }
-  input[type="text"] { flex: 1; min-width: 260px }
-  select { min-width: 160px }
-  .chips { display:flex; gap:.4rem; flex-wrap:wrap }
-  .chip { border:1px solid currentColor; border-radius:999px; padding:.2rem .6rem; background:transparent; cursor:pointer; font-size:.85rem }
-  .chip[aria-pressed="true"] { opacity:.9; font-weight:600 }
-  h2.group { margin:.9rem 0 .2rem }
-  @media print { .toolbar, .chips, .row { display:none !important } }
+  .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .muted { opacity: .7; }
+  .chips { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .chip { border: 1px solid var(--border); border-radius: 9999px; padding: .25rem .6rem; cursor: pointer; background: transparent; }
+  .chip[aria-pressed="true"] { background: var(--button-base); color: var(--button-text); border-color: var(--button-base); }
+  .badge { font-size: .75rem; padding:.15rem .45rem; border-radius: 9999px; border:1px solid var(--border); }
+  .badge.weekly { background: #e9f5ff4d; }
+  .badge.daily { background: #e8ffe94d; }
+  .badge.monthly { background: #fff3e6; }
+  .list { list-style: none; padding-left: 0; }
+  .list li { margin: .35rem 0; }
+  .right { float: right; }
+  .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .8em; border:1px solid var(--border); padding:.05rem .35rem; border-radius: .3rem; }
 </style>
 
-<div class="container">
-  <div class="toolbar">
-    <h1 style="margin:0">Team Digests</h1>
-    <div class="spacer"></div>
-    <button class="theme" id="theme-toggle" type="button" title="Toggle light/dark">🌙 Dark</button>
-  </div>
+<main>
+  <h1>Team Digests</h1>
+  <p class="muted">Search or filter by cadence or owner. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
 
-  <p class="muted">Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+  <div class="row" style="align-items:flex-end">
+    <div style="flex:1 1 380px; min-width:260px">
+      <label for="q">Search filename</label>
+      <input id="q" type="search" placeholder="e.g., weekly_2025-10-06" />
+    </div>
 
-  <div class="grid">
-    <div class="row">
-      <input id="q" type="text" placeholder="Search filename (e.g., weekly_2025-10-06)" />
+    <div>
+      <label for="cadence">Cadence</label>
       <select id="cadence">
         <option value="">All cadences</option>
         <option value="daily">Daily</option>
@@ -47,182 +39,144 @@
       </select>
     </div>
 
-    <div class="chips" aria-label="Quick date filters">
-      <button class="chip" data-filter="today"      aria-pressed="false">Today</button>
-      <button class="chip" data-filter="this-week"  aria-pressed="false">This week</button>
-      <button class="chip" data-filter="last-month" aria-pressed="false">Last month</button>
-      <button class="chip" data-filter="clear"      aria-pressed="false">Clear</button>
+    <div>
+      <label>Quick</label><br />
+      <button class="chip" data-quick="daily"   aria-pressed="false">daily</button>
+      <button class="chip" data-quick="weekly"  aria-pressed="false">weekly</button>
+      <button class="chip" data-quick="monthly" aria-pressed="false">monthly</button>
+      <button class="chip" data-quick="__clear" aria-pressed="false">Clear</button>
     </div>
-
-    <div id="results"></div>
   </div>
-</div>
 
-<script src="./digests.js"></script>
+  <!-- Owners row (built from digests.js) -->
+  <div class="row" id="owner-row" style="align-items:flex-start">
+    <div>
+      <label>Owners</label><br />
+      <div class="chips" id="owner-chips" aria-label="Filter by owner"></div>
+    </div>
+  </div>
+
+  <ul id="results" class="list"></ul>
+
+  <p class="muted">
+    Tip: press <span class="kbd">/</span> to focus search.
+  </p>
+</main>
+
+<!-- Digests data created by the workflow -->
+<script src="digests.js"></script>
 <script>
-  // --- THEME ---------------------------------------------------------------
-  const THEME_KEY = 'team-digest-theme';
-  const $light = document.getElementById('theme-light');
-  const $dark  = document.getElementById('theme-dark');
-  const $btnTheme = document.getElementById('theme-toggle');
-
-  function applyTheme(mode) {
-    if (mode === 'light') { $light.disabled=false; $dark.disabled=true;  $btnTheme.textContent='🌞 Light'; }
-    else if (mode === 'dark') { $light.disabled=true;  $dark.disabled=false; $btnTheme.textContent='🌙 Dark'; }
-    else { applyTheme(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); return; }
-    localStorage.setItem(THEME_KEY, mode);
-  }
-  function initTheme(){ applyTheme(localStorage.getItem(THEME_KEY) || null); }
-  $btnTheme.addEventListener('click', () => {
-    const cur = localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    applyTheme(cur === 'dark' ? 'light' : 'dark');
-  });
-  initTheme();
-
-  // --- INDEX LOGIC ---------------------------------------------------------
   const $q = document.getElementById('q');
   const $cadence = document.getElementById('cadence');
   const $results = document.getElementById('results');
-  const $chips = Array.from(document.querySelectorAll('.chip'));
+  const ownerChips = document.getElementById('owner-chips');
 
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-  function fmtDateISO(iso) {
-    const [y,m,d]=iso.split('-').map(Number); if(!y||!m||!d) return iso;
-    return `${MONTHS[m-1]} ${d}, ${y}`;
-  }
-  function fmtMonth(ym) {
-    const [y,m]=ym.split('-').map(Number); if(!y||!m) return ym;
-    return `${MONTHS[m-1]} ${y}`;
-  }
-  function fmtRange(isoIso) {
-    const [a,b] = isoIso.split('_'); if(!a||!b) return isoIso;
-    const [ya,ma,da]=a.split('-').map(Number), [yb,mb,db]=b.split('-').map(Number);
-    return `${MONTHS[ma-1]} ${da}–${MONTHS[mb-1]} ${db}, ${yb}`;
-  }
-  function prettyDate(cadence, raw) {
-    if (cadence==='daily' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return fmtDateISO(raw);
-    if (cadence==='monthly' && /^\d{4}-\d{2}$/.test(raw)) return fmtMonth(raw);
-    if (cadence==='weekly') {
-      if (/^\d{4}-\d{2}$/.test(raw)) { const [y,w]=raw.split('-'); return `Week ${Number(w)}, ${y}`; }
-      if (/^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(raw)) return fmtRange(raw);
-    }
-    return raw||'';
-  }
-
-  // parse helpers for quick filters
-  function parseDaily(s){ const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/); if(!m) return null; return new Date(+m[1], m[2]-1, +m[3]); }
-  function parseMonthly(s){ const m=s.match(/^(\d{4})-(\d{2})$/); if(!m) return null; return new Date(+m[1], m[2]-1, 1); }
-  function parseWeekly(s){
-    if (/^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(s)) {
-      const [, , , yb,mb,db] = s.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{4})-(\d{2})-(\d{2})$/);
-      return new Date(+yb, mb-1, +db); // use end date
-    }
-    const m=s.match(/^(\d{4})-(\d{2})$/); if(!m) return null; // year-week
-    // approximate as Thursday of that ISO week for filtering
-    const y=+m[1], w=+m[2];
-    const jan4 = new Date(y,0,4);
-    const day = jan4.getDay()||7;
-    const isoWeek1 = new Date(jan4); isoWeek1.setDate(jan4.getDate() + (1-day));
-    const d = new Date(isoWeek1); d.setDate(isoWeek1.getDate() + (w-1)*7 + 3); // Thu
-    return d;
-  }
-
-  function inSameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate(); }
-  function weekRange(d){ // start Monday
-    const x = new Date(d); const day = (x.getDay()+6)%7; x.setDate(x.getDate()-day); // Monday
-    const start = new Date(x); const end = new Date(x); end.setDate(end.getDate()+6);
-    return {start,end};
-  }
-
-  let quick = null; // 'today' | 'this-week' | 'last-month' | null
+  // quick cadence filter chips
+  const quickChips = [...document.querySelectorAll('[data-quick]')];
+  const quick = new Set();       // selected cadence chip(s)
+  let selectedOwners = new Set(); // selected owner chips
 
   function matchesQuick(d) {
-    if (!quick) return true;
-    const now = new Date();
-    if (quick==='today') {
-      // apply to any cadence by interpreting its date
-      return dateMatches(new Date(), d);
-    }
-    if (quick==='this-week') {
-      const {start,end} = weekRange(now);
-      return dateInRange(start,end,d);
-    }
-    if (quick==='last-month') {
-      const m0 = new Date(now.getFullYear(), now.getMonth()-1, 1);
-      const m1 = new Date(now.getFullYear(), now.getMonth(), 0);
-      return dateInRange(m0,m1,d);
-    }
-    return true;
+    if (!quick.size) return true;
+    return quick.has(d.cadence);
   }
 
-  function dateFromDigest(item){
-    // derive a representative Date for filtering, based on cadence + item.date
-    if (item.cadence==='daily')   { const d=parseDaily(item.date);   if(d) return d; }
-    if (item.cadence==='monthly') { const d=parseMonthly(item.date); if(d) return d; }
-    if (item.cadence==='weekly')  { const d=parseWeekly(item.date);  if(d) return d; }
-    return null;
+  function badge(text, cls='') {
+    return `<span class="badge ${cls}">${text}</span>`;
   }
 
-  function dateMatches(target, item){
-    const d = dateFromDigest(item); if(!d) return false;
-    if (item.cadence==='daily') return inSameDay(d,target);
-    if (item.cadence==='weekly'){ const {start,end}=weekRange(target); return d>=start && d<=end; }
-    if (item.cadence==='monthly'){ return d.getFullYear()===target.getFullYear() && d.getMonth()===target.getMonth(); }
-    return false;
+  function initQuickChips() {
+    quickChips.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.quick;
+        if (v === '__clear') {
+          quick.clear();
+          quickChips.forEach(b => b.setAttribute('aria-pressed', 'false'));
+          render();
+          return;
+        }
+        const pressed = btn.getAttribute('aria-pressed') === 'true';
+        btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+        if (pressed) quick.delete(v); else quick.add(v);
+        render();
+      });
+    });
   }
-  function dateInRange(start,end,item){
-    const d=dateFromDigest(item); if(!d) return false;
-    return d>=start && d<=end;
+
+  function initOwnerChips() {
+    const set = new Set();
+    (window.digests || []).forEach(d => (d.owners || []).forEach(o => set.add(o)));
+    const owners = Array.from(set).sort();
+
+    if (!owners.length) {
+      ownerChips.innerHTML = '<span class="muted">No owners found in digests</span>';
+      return;
+    }
+
+    ownerChips.innerHTML =
+      owners.map(o => `<button class="chip" data-owner="${o}" aria-pressed="false">${o}</button>`).join(' ')
+      + ' <button class="chip" data-owner="__clear" aria-pressed="false">Clear</button>';
+
+    ownerChips.querySelectorAll('.chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.owner;
+        if (v === '__clear') {
+          selectedOwners.clear();
+          ownerChips.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-pressed','false'));
+          render();
+          return;
+        }
+        const pressed = btn.getAttribute('aria-pressed') === 'true';
+        btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+        if (pressed) selectedOwners.delete(v); else selectedOwners.add(v);
+        render();
+      });
+    });
   }
 
   function render() {
     const term = ($q.value || '').toLowerCase();
     const cad  = $cadence.value;
+    const wantOwners = Array.from(selectedOwners);
+
     const all  = (window.digests || [])
       .filter(d => !cad || d.cadence === cad)
       .filter(d => !term || d.file.toLowerCase().includes(term))
       .filter(d => matchesQuick(d))
-      .sort((a,b) => (a.file < b.file ? 1 : -1)); // newest first by filename
+      .filter(d => {
+        if (!wantOwners.length) return true;
+        const have = d.owners || [];
+        return wantOwners.every(o => have.includes(o));
+      })
+      .sort((a,b) => (a.file < b.file ? 1 : -1)); // newest first
 
-    const groups = {
-      daily:   all.filter(d => d.cadence==='daily'),
-      weekly:  all.filter(d => d.cadence==='weekly'),
-      monthly: all.filter(d => d.cadence==='monthly'),
-    };
-
-    let html = '';
-    const order = ['daily','weekly','monthly'];
-    const titles= {daily:'Daily', weekly:'Weekly', monthly:'Monthly'};
-    order.forEach(key => {
-      const items = groups[key];
-      if (!items.length) return;
-      html += `<h2 class="group">${titles[key]}</h2><ul class="list">`;
-      html += items.map(d => {
-        const view = `viewer.html?file=${encodeURIComponent(d.file)}`;
-        const raw  = d.file;
-        const label = d.date ? ` — ${prettyDate(d.cadence, d.date)}` : '';
-        return `<li><a href="${view}">${d.file}</a>${label}  <small class="muted">( <a href="${raw}">raw</a> )</small></li>`;
-      }).join('');
-      html += `</ul>`;
-    });
-
-    if (!html) html = `<p class="muted">No matching digests.</p>`;
-    $results.innerHTML = html;
+    $results.innerHTML = all.map(d => {
+      const html = `viewer.html?file=${encodeURIComponent(d.file)}`;
+      const cadenceBadge = badge(d.cadence, d.cadence);
+      const owners = (d.owners || []).map(o => badge(o)).join(' ');
+      return `
+        <li>
+          <a href="${html}">${d.file}</a>
+          <span class="muted">— ${d.date}</span>
+          &nbsp; ${cadenceBadge}
+          ${owners ? '&nbsp;'+owners : ''}
+          <span class="right"><a href="./${encodeURIComponent(d.file)}" class="muted">(raw)</a></span>
+        </li>`;
+    }).join('') || '<li class="muted">No matches</li>';
   }
+
+  // focus on "/" like GitHub
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== $q) {
+      e.preventDefault();
+      $q.focus();
+    }
+  });
 
   $q.addEventListener('input', render);
   $cadence.addEventListener('change', render);
-  $chips.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const type = btn.dataset.filter;
-      $chips.forEach(b => b.setAttribute('aria-pressed','false'));
-      if (type==='clear') { quick=null; render(); return; }
-      quick = type;
-      btn.setAttribute('aria-pressed','true');
-      render();
-    });
-  });
 
+  initQuickChips();
   render();
+  initOwnerChips();
 </script>
