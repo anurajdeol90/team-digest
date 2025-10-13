@@ -22,29 +22,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build static site (copy site, copy digests, make viewer+index)
+      - name: Build static site (copy site, copy digests, create viewer & index, SEO & latest)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
 
-          # 1) Copy any static site assets (optional folder)
+          ## 1) Copy optional static site bits
           if [ -d site ]; then
             cp -r site/* public/ 2>/dev/null || true
           fi
 
-          # 2) Copy raw digests if any
+          ## 2) Copy digests (raw .md files)
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
 
-          # 3) Build digests.js (cadence + date parsed from filenames)
+          ## 3) Generate digests.js (for index rendering / search UI)
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
           if ls outputs/*.md >/dev/null 2>&1; then
@@ -56,7 +55,8 @@ jobs:
                 weekly_*.md) cadence="weekly" ;;
                 monthly_*.md) cadence="monthly" ;;
               esac
-              date="${f%.md}"; date="${date#*_}"
+              date="${f%.md}"
+              date="${date#*_}"
               [ "$first" -eq 1 ] || echo "," >> public/digests.js
               first=0
               printf '  {"file":"%s","cadence":"%s","date":"%s"}' "$f" "$cadence" "$date" >> public/digests.js
@@ -65,85 +65,131 @@ jobs:
           fi
           echo "];" >> public/digests.js
 
-          # 4) Lightweight Markdown viewer (client-side)
-          cat > public/viewer.html <<'HTML'
-          <!doctype html>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>Digest Viewer</title>
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-          <main id="app"><p>Loading…</p></main>
-          <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-          <script>
-            const params = new URLSearchParams(location.search);
-            const file = params.get("file");
-            const app = document.getElementById("app");
-            if (!file) {
-              app.innerHTML = "<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>";
-            } else {
-              fetch(file).then(r => {
-                if (!r.ok) throw new Error("Failed to load " + file);
-                return r.text();
-              }).then(md => {
-                document.title = file + " — Team Digest";
-                app.innerHTML = marked.parse(md);
-              }).catch(e => {
-                app.innerHTML = "<h1>Error</h1><pre>"+e+"</pre>";
-              });
-            }
-          </script>
-          HTML
+          ## 4) latest.json (fast links to latest daily/weekly/monthly)
+          python3 - <<'PY'
+import os, glob, json
+out = {}
+for cad in ("daily","weekly","monthly"):
+    files = sorted([os.path.basename(p) for p in glob.glob(f"outputs/{cad}_*.md")], reverse=True)
+    out[cad] = files[0] if files else None
+with open("public/latest.json","w") as f:
+    json.dump(out, f)
+PY
 
-          # 5) Index page with search & cadence filter
-          cat > public/index.html <<'HTML'
-          <!doctype html>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>Team Digests</title>
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-          <main style="max-width:860px;margin:40px auto;">
-            <h1>Team Digests</h1>
-            <p>Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
-            <div style="display:flex; gap:.5rem; align-items:center; margin:.75rem 0;">
-              <input id="q" placeholder="Search filename (e.g., weekly_2025-10-06)" style="flex:1">
-              <select id="cadence">
-                <option value="">All cadences</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </div>
-            <ul id="list"></ul>
-          </main>
-          <script src="./digests.js"></script>
-          <script>
-            const list = document.getElementById('list');
-            const q = document.getElementById('q');
-            const sel = document.getElementById('cadence');
+          ## 5) viewer.html: render a single .md via marked.js
+          : > public/viewer.html
+          cat >> public/viewer.html <<'HTML'
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digest Viewer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+<main id="app"><p>Loading…</p></main>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const file = params.get("file");
+  const app = document.getElementById("app");
+  if (!file) {
+    app.innerHTML = "<h1>No file provided</h1><p>Usage: viewer.html?file=FILENAME.md</p>";
+  } else {
+    fetch(file).then(r => {
+      if (!r.ok) throw new Error("Failed to load " + file);
+      return r.text();
+    }).then(md => {
+      document.title = file + " — Team Digest";
+      app.innerHTML = marked.parse(md);
+    }).catch(e => {
+      app.innerHTML = "<h1>Error</h1><pre>"+String(e)+"</pre>";
+    });
+  }
+</script>
+HTML
 
-            function render() {
-              const term = q.value.trim().toLowerCase();
-              const cad = sel.value;
-              const items = (window.digests || []).filter(d => {
-                const okName = !term || d.file.toLowerCase().includes(term);
-                const okCad = !cad || d.cadence === cad;
-                return okName && okCad;
-              });
-              list.innerHTML = items.map(d => {
-                const url = `viewer.html?file=${encodeURIComponent(d.file)}`;
-                return `<li><a href="${url}">${d.file}</a> — <small>${d.date}</small>
-                        &nbsp; <small>(<a href="./${d.file}">raw</a>)</small>
-                        &nbsp; <span style="border:1px solid #999;border-radius:.5rem;padding:.05rem .35rem;font-size:.8em;">${d.cadence}</span>
-                        </li>`;
-              }).join('') || '<li>No digests found.</li>';
-            }
-            q.addEventListener('input', render);
-            sel.addEventListener('change', render);
-            render();
-          </script>
-          HTML
+          ## 6) index.html: search & filter UI + “Latest” quick links; basic SEO meta
+          : > public/index.html
+          cat >> public/index.html <<'HTML'
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Digests</title>
+<meta name="description" content="Browse daily, weekly, and monthly team digests. Search by filename or filter by cadence.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+<main>
+  <h1>Team Digests</h1>
+  <p id="latestRow"><em>Loading latest…</em></p>
 
-          # 6) Bypass Jekyll and show final listing
+  <div style="display:flex; gap:8px; align-items:center;">
+    <input id="q" type="search" placeholder="Search filename (e.g., weekly_2025-10-06)" style="flex:1;">
+    <select id="cad">
+      <option value="">All cadences</option>
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+    </select>
+  </div>
+
+  <ul id="list"></ul>
+</main>
+
+<script src="digests.js"></script>
+<script>
+  // Render latest quick links
+  fetch('latest.json').then(r=>r.json()).then(lat=>{
+    const row = document.getElementById('latestRow');
+    const link = f => f ? `<a href="viewer.html?file=${encodeURIComponent(f)}">${f}</a>` : '<em>n/a</em>';
+    row.innerHTML = `Latest — Daily: ${link(lat.daily)} · Weekly: ${link(lat.weekly)} · Monthly: ${link(lat.monthly)}`;
+  }).catch(()=>{ document.getElementById('latestRow').remove(); });
+
+  const list = document.getElementById('list');
+  const q = document.getElementById('q');
+  const cad = document.getElementById('cad');
+
+  function draw() {
+    const term = q.value.trim().toLowerCase();
+    const c = cad.value;
+    const items = (window.digests || [])
+      .filter(d => !c || d.cadence === c)
+      .filter(d => !term || d.file.toLowerCase().includes(term))
+      .sort((a,b) => a.file < b.file ? 1 : -1);
+    list.innerHTML = items.map(({file,cadence})=>{
+      const v = `viewer.html?file=${encodeURIComponent(file)}`;
+      return `<li>
+        <a href="${v}">${file}</a>
+        &nbsp; <small>(<a href="./${file}">raw</a>)</small>
+        &nbsp; <small class="tag">${cadence}</small>
+      </li>`;
+    }).join('') || '<li><em>No matches.</em></li>';
+  }
+  q.addEventListener('input', draw);
+  cad.addEventListener('change', draw);
+  draw();
+</script>
+HTML
+
+          ## 7) robots.txt & sitemap.xml for SEO
+          cat > public/robots.txt <<'TXT'
+User-agent: *
+Allow: /
+Sitemap: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/sitemap.xml
+TXT
+
+          site_base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            echo "  <url><loc>${site_base}/</loc></url>"
+            if ls outputs/*.md >/dev/null 2>&1; then
+              for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
+                enc=$(python3 -c "import urllib.parse;print(urllib.parse.quote('''$f'''))")
+                echo "  <url><loc>${site_base}/viewer.html?file=${enc}</loc></url>"
+                echo "  <url><loc>${site_base}/$f</loc></url>"
+              done
+            fi
+            echo '</urlset>'
+          } > public/sitemap.xml
+
+          ## 8) No-Jekyll & listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public

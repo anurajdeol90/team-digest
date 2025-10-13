@@ -90,8 +90,12 @@ Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
 
 ---
 
-[![Publish Digests](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml)
-[![Site](https://img.shields.io/badge/Pages-live-brightgreen)](https://anurajdeol90.github.io/team-digest/)
+# team-digest
+
+[![Publish Digests to GitHub Pages](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/publish-digests.yml)
+[![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml)
+
+Live site: https://<OWNER>.github.io/<REPO>/
 
 
 
