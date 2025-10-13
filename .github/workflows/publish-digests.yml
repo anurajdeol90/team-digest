@@ -27,7 +27,7 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site (copy site, safe-copy md, generate digests.js)
+      - name: Build site (copy site, safe-copy md, generate digests.js + feeds)
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -35,7 +35,7 @@ jobs:
 
           mkdir -p public
 
-          # 1) Copy static site (if it exists)
+          # 1) Copy static site (if present)
           if [ -d site ]; then
             cp -r site/* public/ 2>/dev/null || true
           fi
@@ -46,9 +46,8 @@ jobs:
           if (( ${#md_files[@]} > 0 )); then
             cp "${md_files[@]}" public/
           fi
-          shopt -u nullglob
 
-          # 3) Generate digests.js (cadence/date/owners) using arrays
+          # 3) Build digests.js (cadence/date/owners)
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
 
@@ -65,8 +64,7 @@ jobs:
             echo "$out"
           }
 
-          shopt -s nullglob
-          md_files=(outputs/*.md)
+          sorted=()
           if (( ${#md_files[@]} > 0 )); then
             # newest-first by filename
             mapfile -t sorted < <(printf '%s\n' "${md_files[@]##*/}" | sort -r)
@@ -80,14 +78,13 @@ jobs:
                 monthly_*.md) cadence="monthly" ;;
               esac
 
-              # date = part after the first underscore, minus .md
+              # date = suffix after first underscore (minus .md)
               base="${f%.md}"
               date="${base#*_}"
 
-              # owners: match '(owner: XX)' or '(owner: AD)' insensitive
+              # owners: match '(owner: XX)' or '(owner: AD)' (case-insensitive)
               owners=()
               if [ -f "outputs/$f" ]; then
-                # shellcheck disable=SC2013
                 while IFS= read -r line; do
                   owners+=( "$line" )
                 done < <(grep -oiE '\(owner: *[A-Za-z0-9_-]+\)' "outputs/$f" \
@@ -107,14 +104,68 @@ jobs:
             done
             echo "" >> public/digests.js
           fi
-          shopt -u nullglob
 
           echo "];" >> public/digests.js
 
-          # 4) Serve files as-is (no Jekyll) + listing
+          # 3b) Publish feeds (JSON + RSS). If no files, publish empty feeds.
+          site_url="https://$GITHUB_REPOSITORY_OWNER.github.io/${GITHUB_REPOSITORY#*/}"
+
+          # JSON Feed (https://jsonfeed.org/version/1.1)
+          {
+            echo '{ "version":"https://jsonfeed.org/version/1.1",'
+            echo '  "title":"Team Digests",'
+            echo "  \"home_page_url\":\"$site_url/\","
+            echo "  \"feed_url\":\"$site_url/feed.json\","
+            echo '  "items": ['
+            if (( ${#sorted[@]} > 0 )); then
+              first=1
+              for f in "${sorted[@]}"; do
+                [ $first -eq 1 ] && first=0 || echo ','
+                base="${f%.md}"
+                date="${base#*_}"
+                url="$site_url/viewer.html?file=$(python3 - <<PY
+import urllib.parse; print(urllib.parse.quote("$(printf %s "$f")"))
+PY
+)"
+                echo "    {\"id\":\"$f\",\"url\":\"$url\",\"title\":\"$f\",\"content_text\":\"$f\",\"date_published\":\"$date\"}"
+              done
+            fi
+            echo '  ]'
+            echo '}'
+          } > public/feed.json
+
+          # RSS 2.0
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<rss version="2.0"><channel>'
+            echo '  <title>Team Digests</title>'
+            echo "  <link>$site_url/</link>"
+            echo '  <description>Latest team digests</description>'
+            if (( ${#sorted[@]} > 0 )); then
+              for f in "${sorted[@]}"; do
+                base="${f%.md}"; date="${base#*_}"
+                url="$site_url/viewer.html?file=$(python3 - <<PY
+import urllib.parse; print(urllib.parse.quote("$(printf %s "$f")"))
+PY
+)"
+                echo '  <item>'
+                echo "    <title>$f</title>"
+                echo "    <link>$url</link>"
+                echo "    <guid isPermaLink=\"false\">$f</guid>"
+                echo "    <pubDate>$date</pubDate>"
+                echo '  </item>'
+              done
+            fi
+            echo '</channel></rss>'
+          } > public/feed.xml
+
+          # 4) Finalize + listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
+
+          shopt -u nullglob
+          set +x
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

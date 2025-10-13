@@ -56,14 +56,14 @@
     </div>
   </div>
 
+  <!-- NEW: Latest section -->
+  <div id="latest"></div>
+
   <ul id="results" class="list"></ul>
 
-  <p class="muted">
-    Tip: press <span class="kbd">/</span> to focus search.
-  </p>
+  <p class="muted">Tip: press <span class="kbd">/</span> to focus search.</p>
 </main>
 
-<!-- Digests data created by the workflow -->
 <script src="digests.js"></script>
 <script>
   const $q = document.getElementById('q');
@@ -73,7 +73,7 @@
 
   // quick cadence filter chips
   const quickChips = [...document.querySelectorAll('[data-quick]')];
-  const quick = new Set();       // selected cadence chip(s)
+  const quick = new Set();        // selected cadence chip(s)
   let selectedOwners = new Set(); // selected owner chips
 
   function matchesQuick(d) {
@@ -134,6 +134,34 @@
     });
   }
 
+  // ---------- Latest section ----------
+  function latestByCadence(items) {
+    const buckets = { daily:[], weekly:[], monthly:[] };
+    items.forEach(d => { if (buckets[d.cadence]) buckets[d.cadence].push(d); });
+    const pick = list => list.sort((a,b)=> (a.file < b.file ? 1 : -1))[0];
+    return {
+      daily:   pick(buckets.daily || []) || null,
+      weekly:  pick(buckets.weekly || []) || null,
+      monthly: pick(buckets.monthly || []) || null,
+    };
+  }
+
+  function renderLatest(all) {
+    const $latest = document.getElementById('latest');
+    const picked = latestByCadence(all);
+    const rows = Object.entries(picked)
+      .filter(([,d]) => !!d)
+      .map(([cad,d]) => {
+        const view = `viewer.html?file=${encodeURIComponent(d.file)}`;
+        const raw  = d.file;
+        return `<li><a href="${view}">${d.file}</a> <small class="muted">( <a href="${raw}">raw</a> )</small></li>`;
+      });
+    $latest.innerHTML = rows.length
+      ? `<h2 style="margin:.9rem 0 .2rem">Latest</h2><ul class="list">${rows.join('')}</ul>`
+      : '';
+  }
+
+  // ---------- Main renderer ----------
   function render() {
     const term = ($q.value || '').toLowerCase();
     const cad  = $cadence.value;
@@ -150,6 +178,10 @@
       })
       .sort((a,b) => (a.file < b.file ? 1 : -1)); // newest first
 
+    // Update Latest section
+    renderLatest(all);
+
+    // Results list
     $results.innerHTML = all.map(d => {
       const html = `viewer.html?file=${encodeURIComponent(d.file)}`;
       const cadenceBadge = badge(d.cadence, d.cadence);
@@ -168,8 +200,7 @@
   // focus on "/" like GitHub
   window.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement !== $q) {
-      e.preventDefault();
-      $q.focus();
+      e.preventDefault(); $q.focus();
     }
   });
 
