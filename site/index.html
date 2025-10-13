@@ -2,40 +2,129 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Team Digests</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
-<style>
-  .muted { opacity:.7 }
-  .grid { display:grid; gap:.5rem }
-  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap }
-  .pill { font-size:.85rem; padding:.15rem .5rem; border:1px solid #ddd; border-radius:999px }
-  .list { margin:0; padding-left:1.1rem }
-</style>
-<h1>Team Digests</h1>
-<p class="muted">Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
 
-<div class="grid">
-  <div class="row">
-    <input id="q" placeholder="Search filename (e.g., weekly_2025-10-06)" style="flex:1" />
-    <select id="cadence">
-      <option value="">All cadences</option>
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-    </select>
+<!-- Themeable Water.css: we load both and toggle them in JS -->
+<link id="theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.min.css" disabled>
+<link id="theme-dark"  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/dark.min.css" disabled>
+
+<style>
+  :root { --gap: .6rem; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 1.25rem; }
+  .muted { opacity: .75 }
+  .grid { display: grid; gap: var(--gap); }
+  .row { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap }
+  .pill { font-size:.85rem; padding:.15rem .6rem; border:1px solid currentColor; border-radius:999px; opacity:.75 }
+  .list { margin:0; padding-left:1.1rem }
+  .spacer { flex: 1 }
+  .toolbar { display:flex; align-items:center; gap: var(--gap); margin:.5rem 0 1rem }
+  button.theme { font-size: .9rem; }
+  /* keep inputs comfy */
+  input[type="text"] { flex: 1; min-width: 260px }
+  select { min-width: 160px }
+</style>
+
+<div class="container">
+  <div class="toolbar">
+    <h1 style="margin:0">Team Digests</h1>
+    <div class="spacer"></div>
+    <button class="theme" id="theme-toggle" type="button" title="Toggle light/dark">🌙 Dark</button>
   </div>
-  <ul id="results" class="list"></ul>
+
+  <p class="muted">Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+
+  <div class="grid">
+    <div class="row">
+      <input id="q" type="text" placeholder="Search filename (e.g., weekly_2025-10-06)" />
+      <select id="cadence">
+        <option value="">All cadences</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+    </div>
+    <ul id="results" class="list"></ul>
+  </div>
 </div>
 
 <script src="./digests.js"></script>
 <script>
-  // digests = [{file, cadence, date}] from digests.js
+  // --- THEME TOGGLE ---------------------------------------------------------
+  const THEME_KEY = 'team-digest-theme';
+  const $light = document.getElementById('theme-light');
+  const $dark  = document.getElementById('theme-dark');
+  const $btnTheme = document.getElementById('theme-toggle');
+
+  function applyTheme(mode) {
+    if (mode === 'light') {
+      $light.disabled = false; $dark.disabled  = true;
+      $btnTheme.textContent = '🌞 Light';
+    } else if (mode === 'dark') {
+      $light.disabled = true;  $dark.disabled  = false;
+      $btnTheme.textContent = '🌙 Dark';
+    } else {
+      // system default
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      applyTheme(prefersDark ? 'dark' : 'light');
+      return;
+    }
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  function initTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    applyTheme(saved || null);
+  }
+  $btnTheme.addEventListener('click', () => {
+    const cur = localStorage.getItem(THEME_KEY) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  });
+  initTheme();
+
+  // --- SEARCH / FILTER ------------------------------------------------------
   const $q = document.getElementById('q');
   const $cadence = document.getElementById('cadence');
   const $results = document.getElementById('results');
 
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function fmtDateISO(iso) {
+    // 'YYYY-MM-DD' -> 'Mon D, YYYY'
+    const [y,m,d] = iso.split('-').map(Number);
+    if (!y || !m || !d) return iso;
+    return `${MONTHS[m-1]} ${d}, ${y}`;
+  }
+  function fmtMonth(ym) {
+    // 'YYYY-MM' -> 'Month YYYY'
+    const [y,m] = ym.split('-').map(Number);
+    if (!y || !m) return ym;
+    return `${MONTHS[m-1]} ${y}`;
+  }
+  function fmtRange(isoIso) {
+    // 'YYYY-MM-DD_YYYY-MM-DD' -> 'Mon D–Mon D, YYYY' (handles year change)
+    const [a,b] = isoIso.split('_');
+    if (!a || !b) return isoIso;
+    const [ya,ma,da] = a.split('-').map(Number);
+    const [yb,mb,db] = b.split('-').map(Number);
+    const left  = `${MONTHS[ma-1]} ${da}`;
+    const right = `${MONTHS[mb-1]} ${db}, ${yb}`;
+    return `${left}–${right}`;
+  }
+  function prettyDate(cadence, raw) {
+    if (!raw) return '';
+    if (cadence === 'daily'   && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return fmtDateISO(raw);
+    if (cadence === 'monthly' && /^\d{4}-\d{2}$/.test(raw))      return fmtMonth(raw);
+    if (cadence === 'weekly') {
+      if (/^\d{4}-\d{2}$/.test(raw)) { // e.g., 2025-42
+        const [y,w] = raw.split('-');
+        return `Week ${Number(w)}, ${y}`;
+      }
+      if (/^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(raw)) return fmtRange(raw);
+    }
+    return raw; // fallback
+  }
+
   function render() {
     const term = ($q.value || '').toLowerCase();
-    const cad = $cadence.value;
+    const cad  = $cadence.value;
     const items = (window.digests || [])
       .filter(d => !cad || d.cadence === cad)
       .filter(d => !term || d.file.toLowerCase().includes(term))
@@ -44,8 +133,8 @@
     $results.innerHTML = items.map(d => {
       const view = `viewer.html?file=${encodeURIComponent(d.file)}`;
       const raw  = d.file;
-      const label = d.date ? ` — ${d.date}` : '';
-      return `<li><a href="${view}">${d.file}</a>${label} &nbsp; <small class="muted">( <a href="${raw}">raw</a> )</small> <span class="pill">${d.cadence}</span></li>`;
+      const label = d.date ? ` — ${prettyDate(d.cadence, d.date)}` : '';
+      return `<li><a href="${view}">${d.file}</a>${label}  <small class="muted">( <a href="${raw}">raw</a> )</small>  <span class="pill">${d.cadence}</span></li>`;
     }).join('') || '<li class="muted">No matching digests.</li>';
   }
 
