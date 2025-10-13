@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Team Digests</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
+<style>
+  .muted { opacity:.7 }
+  .grid { display:grid; gap:.5rem }
+  .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap }
+  .pill { font-size:.85rem; padding:.15rem .5rem; border:1px solid #ddd; border-radius:999px }
+  .list { margin:0; padding-left:1.1rem }
+</style>
+<h1>Team Digests</h1>
+<p class="muted">Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+
+<div class="grid">
+  <div class="row">
+    <input id="q" placeholder="Search filename (e.g., weekly_2025-10-06)" style="flex:1" />
+    <select id="cadence">
+      <option value="">All cadences</option>
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+    </select>
+  </div>
+  <ul id="results" class="list"></ul>
+</div>
+
+<script src="./digests.js"></script>
+<script>
+  // digests = [{file, cadence, date}] from digests.js
+  const $q = document.getElementById('q');
+  const $cadence = document.getElementById('cadence');
+  const $results = document.getElementById('results');
+
+  function render() {
+    const term = ($q.value || '').toLowerCase();
+    const cad = $cadence.value;
+    const items = (window.digests || [])
+      .filter(d => !cad || d.cadence === cad)
+      .filter(d => !term || d.file.toLowerCase().includes(term))
+      .sort((a,b) => (a.file < b.file ? 1 : -1)); // newest first by name
+
+    $results.innerHTML = items.map(d => {
+      const view = `viewer.html?file=${encodeURIComponent(d.file)}`;
+      const raw  = d.file;
+      const label = d.date ? ` — ${d.date}` : '';
+      return `<li><a href="${view}">${d.file}</a>${label} &nbsp; <small class="muted">( <a href="${raw}">raw</a> )</small> <span class="pill">${d.cadence}</span></li>`;
+    }).join('') || '<li class="muted">No matching digests.</li>';
+  }
+
+  $q.addEventListener('input', render);
+  $cadence.addEventListener('change', render);
+  render();
+</script>

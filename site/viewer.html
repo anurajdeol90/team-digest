@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Digest Viewer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
+<main id="app"><p class="muted">Loading…</p></main>
+<p><a href="./index.html">← Back to list</a></p>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const file = params.get('file');
+  const app = document.getElementById('app');
+  if (!file) {
+    app.innerHTML = '<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>';
+  } else {
+    fetch(file).then(r => {
+      if (!r.ok) throw new Error('Failed to load '+file);
+      return r.text();
+    }).then(md => {
+      document.title = file + ' — Digest';
+      app.innerHTML = marked.parse(md);
+    }).catch(e => {
+      app.innerHTML = '<h1>Error</h1><pre>'+String(e)+'</pre>';
+    });
+  }
+</script>
