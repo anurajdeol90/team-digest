@@ -23,22 +23,185 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
 
-      - name: Prepare site
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build public site (copy site, copy digests, generate digests.js + feeds)
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p public
-          # copy static site if present
-          if [ -d site ]; then cp -r site/* public/ 2>/dev/null || true; fi
-          # copy digests if any
+
+          # 1) Copy static site (HTML/JS/CSS) if present
+          if [ -d site ]; then
+            cp -r site/* public/ 2>/dev/null || true
+          fi
+
+          # 2) Copy raw markdown digests if any
           shopt -s nullglob
           files=(outputs/*.md)
-          if (( ${#files[@]} )); then cp "${files[@]}" public/; fi
-          # minimal index so Pages has a root
-          printf '<!doctype html><meta charset="utf-8"><title>Team Digests</title><h1>Team Digests</h1><p>Published.</p>' > public/index.html
+          if (( ${#files[@]} )); then
+            cp "${files[@]}" public/
+          fi
+
+          # 3) Generate digests.js + feed.json + feed.xml from outputs/*.md
+          python3 - <<'PY'
+import os, glob, json, html, re, datetime
+from pathlib import Path
+
+Path("public").mkdir(exist_ok=True)
+
+def infer_cadence(fname: str) -> str:
+    if fname.startswith("daily_"): return "daily"
+    if fname.startswith("weekly_"): return "weekly"
+    if fname.startswith("monthly_"): return "monthly"
+    return "unknown"
+
+def infer_date(fname: str) -> str:
+    # after first underscore, drop .md
+    base = fname[:-3] if fname.endswith(".md") else fname
+    if "_" in base:
+        return base.split("_", 1)[1]
+    return base
+
+items = []
+for path in sorted(glob.glob("outputs/*.md"), reverse=True):
+    name = os.path.basename(path)
+    with open(path, "r", encoding="utf-8") as f:
+        body = f.read()
+
+    # first non-empty line = title (fallback to filename)
+    title = name
+    for line in body.splitlines():
+        s = line.strip()
+        if s:
+            # strip leading markdown header markers if present
+            title = re.sub(r"^#+\s*", "", s)
+            break
+
+    item = {
+        "file": name,
+        "cadence": infer_cadence(name),
+        "date": infer_date(name),
+        "title": title,
+    }
+    items.append(item)
+
+# Derive "latest" across all & per cadence
+latest_overall = items[0] if items else None
+latest_by_cadence = {}
+for cad in ("daily", "weekly", "monthly"):
+    latest = next((i for i in items if i["cadence"] == cad), None)
+    if latest: latest_by_cadence[cad] = latest
+
+# Write digests.js (window.digests = [...])
+with open("public/digests.js", "w", encoding="utf-8") as out:
+    out.write("window.digests = ")
+    json.dump(items, out, ensure_ascii=False)
+    out.write(";\n")
+    out.write("window.latest = ")
+    json.dump({"overall": latest_overall, "byCadence": latest_by_cadence}, out, ensure_ascii=False)
+    out.write(";\n")
+
+# JSON feed (simple)
+feed = {
+    "version": "https://jsonfeed.org/version/1",
+    "title": "Team Digests",
+    "home_page_url": "https://"+os.getenv("GITHUB_REPOSITORY","").split('/')[0]+".github.io/"+os.getenv("GITHUB_REPOSITORY","").split('/')[1]+"/",
+    "items": [
+        {
+            "id": it["file"],
+            "url": it["file"],  # relative paths (served in same directory)
+            "title": it["title"],
+            "content_text": f"{it['cadence']} · {it['date']}",
+        } for it in items
+    ]
+}
+with open("public/feed.json", "w", encoding="utf-8") as f:
+    json.dump(feed, f, ensure_ascii=False, indent=2)
+
+# RSS 2.0 (very small)
+def esc(s): return html.escape(s, quote=True)
+rss_items = []
+for it in items:
+    rss_items.append(
+        f"<item><title>{esc(it['title'])}</title>"
+        f"<link>{esc(it['file'])}</link>"
+        f"<guid isPermaLink='false'>{esc(it['file'])}</guid>"
+        f"<description>{esc(it['cadence'])} · {esc(it['date'])}</description></item>"
+    )
+rss = (
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<rss version='2.0'><channel>"
+    "<title>Team Digests</title>"
+    "<link>.</link><description>Latest team digests</description>"
+    + "".join(rss_items) +
+    "</channel></rss>"
+)
+with open("public/feed.xml", "w", encoding="utf-8") as f:
+    f.write(rss)
+PY
+
+          # 4) Ensure viewer.html exists (if not provided in site/)
+          if [ ! -f public/viewer.html ]; then
+            cat > public/viewer.html <<'HTML'
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Digest Viewer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+<main id="app"><p>Loading…</p></main>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const file = params.get("file");
+const app = document.getElementById("app");
+if (!file) { app.innerHTML = "<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>"; }
+else fetch(file).then(r => {
+  if (!r.ok) throw new Error("Failed to load "+file);
+  return r.text();
+}).then(md => {
+  document.title = file + " — Team Digest";
+  app.innerHTML = marked.parse(md);
+}).catch(e => {
+  app.innerHTML = "<h1>Error</h1><pre>"+String(e)+"</pre>";
+});
+</script>
+HTML
+          fi
+
+          # 5) If site/index.html not provided, drop a tiny fallback
+          if [ ! -f public/index.html ]; then
+            cat > public/index.html <<'HTML'
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Digests</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+<h1>Team Digests</h1>
+<p>See <a href="./viewer.html?file=daily_2025-10-09.md">example viewer</a> or browse the files.</p>
+<script src="./digests.js"></script>
+<ul id="list"></ul>
+<script>
+if (window.digests) {
+  const list = document.getElementById("list");
+  window.digests.forEach(it => {
+    const li = document.createElement("li");
+    li.innerHTML = \`<a href="./viewer.html?file=\${it.file}">\${it.file}</a> (<a href="./\${it.file}">raw</a>) — <small>\${it.cadence}</small>\`;
+    list.appendChild(li);
+  });
+}
+</script>
+HTML
+          fi
+
+          # 6) Serve files as-is (no Jekyll)
           touch public/.nojekyll
+
+          echo "=== public listing ==="
+          ls -la public
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
