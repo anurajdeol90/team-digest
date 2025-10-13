@@ -27,38 +27,51 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site (copy site, copy md, generate digests.js)
+      - name: Build site (copy site, safe-copy md, generate digests.js)
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          set -x
+
           mkdir -p public
 
-          # 1) Copy static site (index/viewer/assets)
-          cp -r site/* public/ 2>/dev/null || true
-
-          # 2) Copy digests (raw .md files)
-          if [ -d outputs ]; then
-            cp -r outputs/* public/ || true
+          # 1) Copy static site (if it exists)
+          if [ -d site ]; then
+            cp -r site/* public/ 2>/dev/null || true
           fi
 
-          # 3) Generate digests.js with cadence/date/owners
+          # 2) Safe-copy digests (only if *.md exists)
+          shopt -s nullglob
+          md_files=(outputs/*.md)
+          if (( ${#md_files[@]} > 0 )); then
+            cp "${md_files[@]}" public/
+          fi
+          shopt -u nullglob
+
+          # 3) Generate digests.js (cadence/date/owners) using arrays
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
 
           json_array() {
-            if [ -z "${1:-}" ]; then echo "[]"; return; fi
-            local arr=""
-            for x in $1; do
-              if [ -n "$arr" ]; then arr="$arr, "; fi
-              arr="$arr\"$x\""
+            if [ $# -eq 0 ]; then echo "[]"; return; fi
+            local out="["
+            local first=1
+            for x in "$@"; do
+              if [ $first -eq 0 ]; then out+=", "; fi
+              first=0
+              out+="\"$x\""
             done
-            echo "[$arr]"
+            out+="]"
+            echo "$out"
           }
 
-          if ls outputs/*.md >/dev/null 2>&1; then
-            first=1
+          shopt -s nullglob
+          md_files=(outputs/*.md)
+          if (( ${#md_files[@]} > 0 )); then
             # newest-first by filename
-            for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
+            mapfile -t sorted < <(printf '%s\n' "${md_files[@]##*/}" | sort -r)
+            first=1
+            for f in "${sorted[@]}"; do
               # cadence by filename prefix
               cadence="unknown"
               case "$f" in
@@ -67,30 +80,38 @@ jobs:
                 monthly_*.md) cadence="monthly" ;;
               esac
 
-              # date = suffix after first underscore (same as your other pages)
-              date="${f%.md}"
-              date="${date#*_}"
+              # date = part after the first underscore, minus .md
+              base="${f%.md}"
+              date="${base#*_}"
 
-              # owners: scan lines like "(owner: AD)" "(owner: JD)" (case-insensitive)
-              owners_raw=""
+              # owners: match '(owner: XX)' or '(owner: AD)' insensitive
+              owners=()
               if [ -f "outputs/$f" ]; then
-                owners_raw="$(grep -oiE '\(owner: *[A-Za-z0-9_-]+\)' "outputs/$f" \
-                  | sed -E 's/^\(owner: *//; s/\)$//; s/ +//g' \
-                  | sort -u \
-                  | tr '\n' ' ')"
+                # shellcheck disable=SC2013
+                while IFS= read -r line; do
+                  owners+=( "$line" )
+                done < <(grep -oiE '\(owner: *[A-Za-z0-9_-]+\)' "outputs/$f" \
+                         | sed -E 's/^\(owner: *//; s/\)$//; s/ +//g' \
+                         | sort -u)
               fi
-              owners_json="$(json_array "$owners_raw")"
 
-              [ "$first" -eq 1 ] || echo "," >> public/digests.js
+              owners_json="$(json_array "${owners[@]}")"
+
+              if [ $first -eq 0 ]; then
+                echo "," >> public/digests.js
+              fi
               first=0
+
               printf '  {"file":"%s","cadence":"%s","date":"%s","owners":%s}' \
                 "$f" "$cadence" "$date" "$owners_json" >> public/digests.js
             done
             echo "" >> public/digests.js
           fi
+          shopt -u nullglob
+
           echo "];" >> public/digests.js
 
-          # 4) Serve files as-is (no Jekyll) + list
+          # 4) Serve files as-is (no Jekyll) + listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
