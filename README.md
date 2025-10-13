@@ -88,4 +88,10 @@ Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
 2. Run **Daily**, **Weekly**, and **Monthly** manually on `main`.  
 3. Confirm new files appear under `outputs/` and (if configured) Slack/email arrive.
 
+---
+
+[![Publish Digests](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml)
+[![Site](https://img.shields.io/badge/Pages-live-brightgreen)](https://anurajdeol90.github.io/team-digest/)
+
+
 
