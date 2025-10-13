@@ -7,6 +7,15 @@
 
 Automated team meeting digests: summarize updates, decisions, risks, and actions into Markdown or JSON, with optional Slack/email notifications.
 
+## 📚 Docs
+
+- **Configuration** – [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
+- **Workflows & schedules** – [docs/WORKFLOWS.md](docs/WORKFLOWS.md)  
+- **Contributing** – [CONTRIBUTING.md](CONTRIBUTING.md)  
+- **Support** – [docs/SUPPORT.md](docs/SUPPORT.md)  
+- **Security policy** – [SECURITY.md](SECURITY.md)  
+- **Code of Conduct** – [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
 ---
 
 ## ✨ Features
@@ -78,3 +87,5 @@ Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
 1. Add at least one file under `logs/` (or your `DIGEST_INPUT_DIR`).  
 2. Run **Daily**, **Weekly**, and **Monthly** manually on `main`.  
 3. Confirm new files appear under `outputs/` and (if configured) Slack/email arrive.
+
+
