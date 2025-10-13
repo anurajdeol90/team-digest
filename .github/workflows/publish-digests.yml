@@ -7,6 +7,7 @@ on:
     paths:
       - "outputs/*.md"
       - "site/**"
+      - ".github/workflows/publish-digests.yml"
 
 permissions:
   contents: read
@@ -21,28 +22,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site (copy static, copy digests, viewer, index, digests.js)
+      - name: Build static site (copy site, copy digests, make viewer+index)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
 
-          # 1) Copy static site files if present (favicon, 404.html, etc.)
+          # 1) Copy any static site assets (optional folder)
           if [ -d site ]; then
             cp -r site/* public/ 2>/dev/null || true
           fi
 
-          # 2) Copy raw digests (Markdown) if present
+          # 2) Copy raw digests if any
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
 
-          # 3) Build digests.js (cadence + date extracted from filenames)
+          # 3) Build digests.js (cadence + date parsed from filenames)
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
           if ls outputs/*.md >/dev/null 2>&1; then
@@ -54,8 +56,7 @@ jobs:
                 weekly_*.md) cadence="weekly" ;;
                 monthly_*.md) cadence="monthly" ;;
               esac
-              date="${f%.md}"
-              date="${date#*_}"
+              date="${f%.md}"; date="${date#*_}"
               [ "$first" -eq 1 ] || echo "," >> public/digests.js
               first=0
               printf '  {"file":"%s","cadence":"%s","date":"%s"}' "$f" "$cadence" "$date" >> public/digests.js
@@ -64,136 +65,88 @@ jobs:
           fi
           echo "];" >> public/digests.js
 
-          # 4) Client-side Markdown viewer (uses marked.js)
-          : > public/viewer.html
-          cat >> public/viewer.html <<'HTML'
-<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Digest Viewer — Team Digests</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-<main id="app"><p>Loading…</p></main>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script>
-  const params = new URLSearchParams(location.search);
-  const file = params.get("file");
-  const app = document.getElementById("app");
-  if (!file) {
-    app.innerHTML = "<h1>No file provided</h1><p>Use <code>?file=FILENAME.md</code></p>";
-  } else {
-    fetch(file).then(r => {
-      if (!r.ok) throw new Error("Failed to load "+file);
-      return r.text();
-    }).then(md => {
-      document.title = file + " — Team Digests";
-      app.innerHTML = marked.parse(md);
-    }).catch(e => {
-      app.innerHTML = "<h1>Error</h1><pre>"+e+"</pre>";
-    });
-  }
-</script>
-HTML
+          # 4) Lightweight Markdown viewer (client-side)
+          cat > public/viewer.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Digest Viewer</title>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+          <main id="app"><p>Loading…</p></main>
+          <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+          <script>
+            const params = new URLSearchParams(location.search);
+            const file = params.get("file");
+            const app = document.getElementById("app");
+            if (!file) {
+              app.innerHTML = "<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>";
+            } else {
+              fetch(file).then(r => {
+                if (!r.ok) throw new Error("Failed to load " + file);
+                return r.text();
+              }).then(md => {
+                document.title = file + " — Team Digest";
+                app.innerHTML = marked.parse(md);
+              }).catch(e => {
+                app.innerHTML = "<h1>Error</h1><pre>"+e+"</pre>";
+              });
+            }
+          </script>
+          HTML
 
-          # 5) Homepage (with OG/Twitter meta + search/filter)
-          : > public/index.html
-          cat >> public/index.html <<'HTML'
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Team Digests</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
-<meta property="og:title" content="Team Digests" />
-<meta property="og:description" content="Search and browse the latest team digests." />
-<meta property="og:type" content="website" />
-<meta property="og:url" content="https://anurajdeol90.github.io/team-digest/" />
-<meta name="twitter:card" content="summary" />
-<style>
-  .tag{display:inline-block;margin-left:.5rem;padding:.1rem .5rem;border-radius:999px;background:#2b6cb0;color:#fff;font-size:.8rem}
-  .muted{opacity:.8}
-  .row{margin:.4rem 0}
-</style>
-</head>
-<body>
-<main>
-  <h1>Team Digests</h1>
-  <p>Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+          # 5) Index page with search & cadence filter
+          cat > public/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Team Digests</title>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+          <main style="max-width:860px;margin:40px auto;">
+            <h1>Team Digests</h1>
+            <p>Search or filter by cadence. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+            <div style="display:flex; gap:.5rem; align-items:center; margin:.75rem 0;">
+              <input id="q" placeholder="Search filename (e.g., weekly_2025-10-06)" style="flex:1">
+              <select id="cadence">
+                <option value="">All cadences</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <ul id="list"></ul>
+          </main>
+          <script src="./digests.js"></script>
+          <script>
+            const list = document.getElementById('list');
+            const q = document.getElementById('q');
+            const sel = document.getElementById('cadence');
 
-  <div class="row">
-    <input id="q" type="search" placeholder="Search filename (e.g., weekly_2025-10-06)" style="width:68%">
-    <select id="cad" style="width:30%">
-      <option value="">All cadences</option>
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-    </select>
-  </div>
+            function render() {
+              const term = q.value.trim().toLowerCase();
+              const cad = sel.value;
+              const items = (window.digests || []).filter(d => {
+                const okName = !term || d.file.toLowerCase().includes(term);
+                const okCad = !cad || d.cadence === cad;
+                return okName && okCad;
+              });
+              list.innerHTML = items.map(d => {
+                const url = `viewer.html?file=${encodeURIComponent(d.file)}`;
+                return `<li><a href="${url}">${d.file}</a> — <small>${d.date}</small>
+                        &nbsp; <small>(<a href="./${d.file}">raw</a>)</small>
+                        &nbsp; <span style="border:1px solid #999;border-radius:.5rem;padding:.05rem .35rem;font-size:.8em;">${d.cadence}</span>
+                        </li>`;
+              }).join('') || '<li>No digests found.</li>';
+            }
+            q.addEventListener('input', render);
+            sel.addEventListener('change', render);
+            render();
+          </script>
+          HTML
 
-  <ul id="list"></ul>
-</main>
-
-<script src="./digests.js"></script>
-<script>
-  const list = document.getElementById('list');
-  const q = document.getElementById('q');
-  const cad = document.getElementById('cad');
-
-  function render() {
-    const term = q.value.trim().toLowerCase();
-    const filt = cad.value;
-    const items = (window.digests || []).filter(d =>
-      (!term || d.file.toLowerCase().includes(term)) &&
-      (!filt || d.cadence === filt)
-    );
-    list.innerHTML = items.map(d => {
-      const url = `viewer.html?file=${encodeURIComponent(d.file)}`;
-      const raw = d.file;
-      return `<li><a href="./${url}">${d.file}</a> — <span class="muted">${d.date}</span> <span class="tag">${d.cadence}</span> ( <a class="muted" href="./${raw}">raw</a> )</li>`;
-    }).join('') || '<li>No digests found yet.</li>';
-  }
-  q.addEventListener('input', render);
-  cad.addEventListener('change', render);
-  render();
-</script>
-</body>
-</html>
-HTML
-
-          # 6) No Jekyll; list output for debug
+          # 6) Bypass Jekyll and show final listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
-
-      # 6.5) Generate sitemap & robots AFTER the index is created
-      - name: Generate sitemap & robots
-        shell: bash
-        run: |
-          set -euo pipefail
-          BASE_URL="https://anurajdeol90.github.io/team-digest"
-
-          # sitemap.xml
-          {
-            echo '<?xml version="1.0" encoding="UTF-8"?>'
-            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-            echo "  <url><loc>${BASE_URL}/</loc></url>"
-            if ls outputs/*.md >/dev/null 2>&1; then
-              for f in $(ls -1 outputs/*.md | xargs -n1 basename); do
-                echo "  <url><loc>${BASE_URL}/viewer.html?file=${f}</loc></url>"
-              done
-              for f in $(ls -1 outputs/*.md | xargs -n1 basename); do
-                echo "  <url><loc>${BASE_URL}/${f}</loc></url>"
-              done
-            fi
-            echo '</urlset>'
-          } > public/sitemap.xml
-
-          # robots.txt
-          {
-            echo "User-agent: *"
-            echo "Allow: /"
-            echo "Sitemap: ${BASE_URL}/sitemap.xml"
-          } > public/robots.txt
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
