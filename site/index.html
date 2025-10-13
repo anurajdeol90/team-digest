@@ -1,213 +1,96 @@
 <!doctype html>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Team Digests</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
 <style>
-  .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
-  .muted { opacity: .7; }
-  .chips { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .chip { border: 1px solid var(--border); border-radius: 9999px; padding: .25rem .6rem; cursor: pointer; background: transparent; }
-  .chip[aria-pressed="true"] { background: var(--button-base); color: var(--button-text); border-color: var(--button-base); }
-  .badge { font-size: .75rem; padding:.15rem .45rem; border-radius: 9999px; border:1px solid var(--border); }
-  .badge.weekly { background: #e9f5ff4d; }
-  .badge.daily { background: #e8ffe94d; }
-  .badge.monthly { background: #fff3e6; }
-  .list { list-style: none; padding-left: 0; }
-  .list li { margin: .35rem 0; }
-  .right { float: right; }
-  .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .8em; border:1px solid var(--border); padding:.05rem .35rem; border-radius: .3rem; }
+  .pill{display:inline-block;border:1px solid #444;border-radius:999px;padding:.1rem .6rem;margin-left:.4rem;font-size:.85rem;opacity:.8}
+  .row{display:flex;align-items:center;gap:.5rem}
+  .muted{opacity:.7}
+  .grid{display:grid;gap:.75rem}
+  .latest{padding:.75rem;border:1px solid #333;border-radius:.75rem;background:#121212}
+  .row a{white-space:nowrap}
+  .toolbar{display:flex;gap:.5rem;flex-wrap:wrap}
 </style>
 
-<main>
-  <h1>Team Digests</h1>
-  <p class="muted">Search or filter by cadence or owner. Click a result to view the rendered digest; “raw” opens the original Markdown.</p>
+<h1>Team Digests</h1>
 
-  <div class="row" style="align-items:flex-end">
-    <div style="flex:1 1 380px; min-width:260px">
-      <label for="q">Search filename</label>
-      <input id="q" type="search" placeholder="e.g., weekly_2025-10-06" />
-    </div>
+<section class="latest" id="latestBox" hidden>
+  <h2>Latest</h2>
+  <div class="grid" id="latestList"></div>
+</section>
 
-    <div>
-      <label for="cadence">Cadence</label>
-      <select id="cadence">
-        <option value="">All cadences</option>
-        <option value="daily">Daily</option>
-        <option value="weekly">Weekly</option>
-        <option value="monthly">Monthly</option>
-      </select>
-    </div>
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Search filename (e.g., weekly_2025-10-06)" />
+  <select id="cad">
+    <option value="">All cadences</option>
+    <option value="daily">Daily</option>
+    <option value="weekly">Weekly</option>
+    <option value="monthly">Monthly</option>
+  </select>
+  <a href="./feed.json" class="pill" target="_blank" rel="noopener">JSON feed</a>
+  <a href="./feed.xml" class="pill" target="_blank" rel="noopener">RSS</a>
+</div>
 
-    <div>
-      <label>Quick</label><br />
-      <button class="chip" data-quick="daily"   aria-pressed="false">daily</button>
-      <button class="chip" data-quick="weekly"  aria-pressed="false">weekly</button>
-      <button class="chip" data-quick="monthly" aria-pressed="false">monthly</button>
-      <button class="chip" data-quick="__clear" aria-pressed="false">Clear</button>
-    </div>
-  </div>
+<ul id="list"></ul>
 
-  <!-- Owners row (built from digests.js) -->
-  <div class="row" id="owner-row" style="align-items:flex-start">
-    <div>
-      <label>Owners</label><br />
-      <div class="chips" id="owner-chips" aria-label="Filter by owner"></div>
-    </div>
-  </div>
-
-  <!-- NEW: Latest section -->
-  <div id="latest"></div>
-
-  <ul id="results" class="list"></ul>
-
-  <p class="muted">Tip: press <span class="kbd">/</span> to focus search.</p>
-</main>
-
-<script src="digests.js"></script>
+<script src="./digests.js"></script>
 <script>
-  const $q = document.getElementById('q');
-  const $cadence = document.getElementById('cadence');
-  const $results = document.getElementById('results');
-  const ownerChips = document.getElementById('owner-chips');
+(function(){
+  const digests = (window.digests||[]).slice(); // newest first
+  const latest = (window.latest||{});
+  const list = document.getElementById('list');
+  const q = document.getElementById('q');
+  const cad = document.getElementById('cad');
 
-  // quick cadence filter chips
-  const quickChips = [...document.querySelectorAll('[data-quick]')];
-  const quick = new Set();        // selected cadence chip(s)
-  let selectedOwners = new Set(); // selected owner chips
-
-  function matchesQuick(d) {
-    if (!quick.size) return true;
-    return quick.has(d.cadence);
+  function row(it){
+    const li = document.createElement('li');
+    li.className = 'row';
+    li.innerHTML = `
+      <a href="./viewer.html?file=${encodeURIComponent(it.file)}">${it.file}</a>
+      <span class="muted">— ${it.date}</span>
+      <span class="pill">${it.cadence}</span>
+      <small>(<a href="./${encodeURIComponent(it.file)}">raw</a>)</small>`;
+    return li;
   }
 
-  function badge(text, cls='') {
-    return `<span class="badge ${cls}">${text}</span>`;
+  function render(){
+    const needle = q.value.trim().toLowerCase();
+    const filterCad = cad.value;
+    list.innerHTML = '';
+    digests
+      .filter(it => (!filterCad || it.cadence===filterCad))
+      .filter(it => (!needle || it.file.toLowerCase().includes(needle)))
+      .forEach(it => list.appendChild(row(it)));
   }
 
-  function initQuickChips() {
-    quickChips.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const v = btn.dataset.quick;
-        if (v === '__clear') {
-          quick.clear();
-          quickChips.forEach(b => b.setAttribute('aria-pressed', 'false'));
-          render();
-          return;
-        }
-        const pressed = btn.getAttribute('aria-pressed') === 'true';
-        btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
-        if (pressed) quick.delete(v); else quick.add(v);
-        render();
-      });
+  // Latest section
+  const latestBox = document.getElementById('latestBox');
+  const latestList = document.getElementById('latestList');
+  function renderLatest(){
+    const picks = [];
+    if (latest.overall) picks.push({label:"Newest", item:latest.overall});
+    if (latest.byCadence && latest.byCadence.daily)   picks.push({label:"Daily",   item:latest.byCadence.daily});
+    if (latest.byCadence && latest.byCadence.weekly)  picks.push({label:"Weekly",  item:latest.byCadence.weekly});
+    if (latest.byCadence && latest.byCadence.monthly) picks.push({label:"Monthly", item:latest.byCadence.monthly});
+    if (!picks.length) return;
+    latestBox.hidden = false;
+    picks.forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'row';
+      div.innerHTML = `
+        <strong class="pill">${p.label}</strong>
+        <a href="./viewer.html?file=${encodeURIComponent(p.item.file)}">${p.item.title || p.item.file}</a>
+        <span class="muted">— ${p.item.cadence}, ${p.item.date}</span>
+        <small>(<a href="./${encodeURIComponent(p.item.file)}">raw</a>)</small>`;
+      latestList.appendChild(div);
     });
   }
 
-  function initOwnerChips() {
-    const set = new Set();
-    (window.digests || []).forEach(d => (d.owners || []).forEach(o => set.add(o)));
-    const owners = Array.from(set).sort();
+  q.addEventListener('input', render);
+  cad.addEventListener('change', render);
 
-    if (!owners.length) {
-      ownerChips.innerHTML = '<span class="muted">No owners found in digests</span>';
-      return;
-    }
-
-    ownerChips.innerHTML =
-      owners.map(o => `<button class="chip" data-owner="${o}" aria-pressed="false">${o}</button>`).join(' ')
-      + ' <button class="chip" data-owner="__clear" aria-pressed="false">Clear</button>';
-
-    ownerChips.querySelectorAll('.chip').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const v = btn.dataset.owner;
-        if (v === '__clear') {
-          selectedOwners.clear();
-          ownerChips.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-pressed','false'));
-          render();
-          return;
-        }
-        const pressed = btn.getAttribute('aria-pressed') === 'true';
-        btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
-        if (pressed) selectedOwners.delete(v); else selectedOwners.add(v);
-        render();
-      });
-    });
-  }
-
-  // ---------- Latest section ----------
-  function latestByCadence(items) {
-    const buckets = { daily:[], weekly:[], monthly:[] };
-    items.forEach(d => { if (buckets[d.cadence]) buckets[d.cadence].push(d); });
-    const pick = list => list.sort((a,b)=> (a.file < b.file ? 1 : -1))[0];
-    return {
-      daily:   pick(buckets.daily || []) || null,
-      weekly:  pick(buckets.weekly || []) || null,
-      monthly: pick(buckets.monthly || []) || null,
-    };
-  }
-
-  function renderLatest(all) {
-    const $latest = document.getElementById('latest');
-    const picked = latestByCadence(all);
-    const rows = Object.entries(picked)
-      .filter(([,d]) => !!d)
-      .map(([cad,d]) => {
-        const view = `viewer.html?file=${encodeURIComponent(d.file)}`;
-        const raw  = d.file;
-        return `<li><a href="${view}">${d.file}</a> <small class="muted">( <a href="${raw}">raw</a> )</small></li>`;
-      });
-    $latest.innerHTML = rows.length
-      ? `<h2 style="margin:.9rem 0 .2rem">Latest</h2><ul class="list">${rows.join('')}</ul>`
-      : '';
-  }
-
-  // ---------- Main renderer ----------
-  function render() {
-    const term = ($q.value || '').toLowerCase();
-    const cad  = $cadence.value;
-    const wantOwners = Array.from(selectedOwners);
-
-    const all  = (window.digests || [])
-      .filter(d => !cad || d.cadence === cad)
-      .filter(d => !term || d.file.toLowerCase().includes(term))
-      .filter(d => matchesQuick(d))
-      .filter(d => {
-        if (!wantOwners.length) return true;
-        const have = d.owners || [];
-        return wantOwners.every(o => have.includes(o));
-      })
-      .sort((a,b) => (a.file < b.file ? 1 : -1)); // newest first
-
-    // Update Latest section
-    renderLatest(all);
-
-    // Results list
-    $results.innerHTML = all.map(d => {
-      const html = `viewer.html?file=${encodeURIComponent(d.file)}`;
-      const cadenceBadge = badge(d.cadence, d.cadence);
-      const owners = (d.owners || []).map(o => badge(o)).join(' ');
-      return `
-        <li>
-          <a href="${html}">${d.file}</a>
-          <span class="muted">— ${d.date}</span>
-          &nbsp; ${cadenceBadge}
-          ${owners ? '&nbsp;'+owners : ''}
-          <span class="right"><a href="./${encodeURIComponent(d.file)}" class="muted">(raw)</a></span>
-        </li>`;
-    }).join('') || '<li class="muted">No matches</li>';
-  }
-
-  // focus on "/" like GitHub
-  window.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement !== $q) {
-      e.preventDefault(); $q.focus();
-    }
-  });
-
-  $q.addEventListener('input', render);
-  $cadence.addEventListener('change', render);
-
-  initQuickChips();
+  renderLatest();
   render();
-  initOwnerChips();
+})();
 </script>
