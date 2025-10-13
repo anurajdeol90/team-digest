@@ -2,16 +2,77 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Digest Viewer</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css" />
-<main id="app"><p class="muted">Loading…</p></main>
-<p><a href="./index.html">← Back to list</a></p>
+
+<!-- Themeable Water.css (same toggle as index) -->
+<link id="theme-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.min.css" disabled>
+<link id="theme-dark"  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/dark.min.css" disabled>
+
+<style>
+  .container { max-width: 900px; margin: 0 auto; padding: 1.25rem; }
+  .toolbar { display:flex; align-items:center; gap:.6rem; margin-bottom:.8rem }
+  .spacer { flex:1 }
+  button.theme { font-size:.9rem }
+  /* Print-friendly: remove chrome, expand content, black text */
+  @media print {
+    .toolbar, .backlink { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
+    .container { max-width: 100%; padding: 0; margin: 0; }
+    a { color: #000 !important; text-decoration: none; }
+    pre, code { color: #000 !important; }
+    h1 { margin: 0 0 .25in 0; }
+  }
+</style>
+
+<div class="container">
+  <div class="toolbar">
+    <a class="backlink" href="./index.html">← Back</a>
+    <div class="spacer"></div>
+    <button class="theme" id="theme-toggle" type="button" title="Toggle light/dark">🌙 Dark</button>
+    <button type="button" onclick="window.print()" title="Print / Save as PDF">🖨️ Print</button>
+  </div>
+
+  <main id="app"><p class="muted">Loading…</p></main>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
+  // --- THEME TOGGLE (same logic as index) -------------------------------
+  const THEME_KEY = 'team-digest-theme';
+  const $light = document.getElementById('theme-light');
+  const $dark  = document.getElementById('theme-dark');
+  const $btnTheme = document.getElementById('theme-toggle');
+
+  function applyTheme(mode) {
+    if (mode === 'light') {
+      $light.disabled = false; $dark.disabled  = true;
+      $btnTheme.textContent = '🌞 Light';
+    } else if (mode === 'dark') {
+      $light.disabled = true;  $dark.disabled  = false;
+      $btnTheme.textContent = '🌙 Dark';
+    } else {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      applyTheme(prefersDark ? 'dark' : 'light');
+      return;
+    }
+    localStorage.setItem(THEME_KEY, mode);
+  }
+  function initTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    applyTheme(saved || null);
+  }
+  $btnTheme.addEventListener('click', () => {
+    const cur = localStorage.getItem(THEME_KEY) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+  });
+  initTheme();
+
+  // --- Markdown rendering ------------------------------------------------
   const params = new URLSearchParams(location.search);
   const file = params.get('file');
   const app = document.getElementById('app');
+
   if (!file) {
-    app.innerHTML = '<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>';
+    app.innerHTML = '<h1>No file provided</h1><p>Use <code>?file=FILENAME.md</code></p>';
   } else {
     fetch(file).then(r => {
       if (!r.ok) throw new Error('Failed to load '+file);
