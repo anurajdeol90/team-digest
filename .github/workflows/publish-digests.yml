@@ -7,6 +7,7 @@ on:
     paths:
       - "outputs/*.md"
       - "site/**"
+      - ".github/workflows/publish-digests.yml"
 
 permissions:
   contents: read
@@ -22,43 +23,74 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site (copy site, copy md, generate digests.js, index)
+      - name: Build site (copy site, copy md, generate digests.js)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
-          # 1) Copy static site (index.html, viewer.html, etc.)
+
+          # 1) Copy static site (index/viewer/assets)
           cp -r site/* public/ 2>/dev/null || true
-          # 2) Copy digests
+
+          # 2) Copy digests (raw .md files)
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
-          # 3) Generate digests.js with inferred cadence/date from filenames
+
+          # 3) Generate digests.js with cadence/date/owners
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
+
+          json_array() {
+            if [ -z "${1:-}" ]; then echo "[]"; return; fi
+            local arr=""
+            for x in $1; do
+              if [ -n "$arr" ]; then arr="$arr, "; fi
+              arr="$arr\"$x\""
+            done
+            echo "[$arr]"
+          }
+
           if ls outputs/*.md >/dev/null 2>&1; then
             first=1
+            # newest-first by filename
             for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
+              # cadence by filename prefix
               cadence="unknown"
               case "$f" in
                 daily_*.md) cadence="daily" ;;
                 weekly_*.md) cadence="weekly" ;;
                 monthly_*.md) cadence="monthly" ;;
               esac
+
+              # date = suffix after first underscore (same as your other pages)
               date="${f%.md}"
               date="${date#*_}"
+
+              # owners: scan lines like "(owner: AD)" "(owner: JD)" (case-insensitive)
+              owners_raw=""
+              if [ -f "outputs/$f" ]; then
+                owners_raw="$(grep -oiE '\(owner: *[A-Za-z0-9_-]+\)' "outputs/$f" \
+                  | sed -E 's/^\(owner: *//; s/\)$//; s/ +//g' \
+                  | sort -u \
+                  | tr '\n' ' ')"
+              fi
+              owners_json="$(json_array "$owners_raw")"
+
               [ "$first" -eq 1 ] || echo "," >> public/digests.js
               first=0
-              printf '  {"file":"%s","cadence":"%s","date":"%s"}' "$f" "$cadence" "$date" >> public/digests.js
+              printf '  {"file":"%s","cadence":"%s","date":"%s","owners":%s}' \
+                "$f" "$cadence" "$date" "$owners_json" >> public/digests.js
             done
             echo "" >> public/digests.js
           fi
           echo "];" >> public/digests.js
 
-          # 4) Finalize
+          # 4) Serve files as-is (no Jekyll) + list
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
