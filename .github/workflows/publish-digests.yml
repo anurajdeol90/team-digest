@@ -1,4 +1,4 @@
-﻿name: Publish Digests to GitHub Pages
+name: Publish Digests to GitHub Pages
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - "outputs/*.md"
+      - "site/**"
 
 permissions:
   contents: read
@@ -24,62 +25,40 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build site (copy md, add viewer, build index)
+      - name: Build site (copy site, copy md, generate digests.js, index)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p public
-
-          # 1) Copy digests if any (keep raw .md files)
+          # 1) Copy static site (index.html, viewer.html, etc.)
+          cp -r site/* public/ 2>/dev/null || true
+          # 2) Copy digests
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
-
-          # 2) Create a simple Markdown viewer (client-side render with marked.js)
-          : > public/viewer.html
-          echo '<!doctype html>'                                   >> public/viewer.html
-          echo '<meta charset="utf-8">'                            >> public/viewer.html
-          echo '<meta name="viewport" content="width=device-width, initial-scale=1">' >> public/viewer.html
-          echo '<title>Digest Viewer</title>'                      >> public/viewer.html
-          echo '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">' >> public/viewer.html
-          echo '<main id="app"><p>Loading…</p></main>'             >> public/viewer.html
-          echo '<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>' >> public/viewer.html
-          echo '<script>'                                           >> public/viewer.html
-          echo '  const params = new URLSearchParams(location.search);' >> public/viewer.html
-          echo '  const file = params.get("file");'                 >> public/viewer.html
-          echo '  const app = document.getElementById("app");'      >> public/viewer.html
-          echo '  if (!file) { app.innerHTML = "<h1>No file provided</h1><p>Use ?file=FILENAME.md</p>"; }' >> public/viewer.html
-          echo '  else fetch(file).then(r => {'                     >> public/viewer.html
-          echo '    if (!r.ok) throw new Error("Failed to load "+file);' >> public/viewer.html
-          echo '    return r.text();'                               >> public/viewer.html
-          echo '  }).then(md => {'                                  >> public/viewer.html
-          echo '    document.title = file + " — Team Digest";'      >> public/viewer.html
-          echo '    app.innerHTML = marked.parse(md);'              >> public/viewer.html
-          echo '  }).catch(e => {'                                  >> public/viewer.html
-          echo '    app.innerHTML = "<h1>Error</h1><pre>"+e+"</pre>";' >> public/viewer.html
-          echo '  });'                                              >> public/viewer.html
-          echo '</script>'                                          >> public/viewer.html
-
-          # 3) Build index linking to viewer.html (newest first) + raw .md link
-          : > public/index.html
-          echo '<!doctype html>'                                    >> public/index.html
-          echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' >> public/index.html
-          echo '<title>Team Digests</title>'                        >> public/index.html
-          echo '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">' >> public/index.html
-          echo '<h1>Team Digests</h1>'                              >> public/index.html
-          echo '<p>Browse recent digests below.</p>'                >> public/index.html
-          echo '<ul>'                                               >> public/index.html
+          # 3) Generate digests.js with inferred cadence/date from filenames
+          : > public/digests.js
+          echo "window.digests = [" >> public/digests.js
           if ls outputs/*.md >/dev/null 2>&1; then
+            first=1
             for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
-              html="viewer.html?file=$f"
-              echo "<li><a href=\"./$html\">$f</a> &nbsp; <small>(<a href=\"./$f\">raw .md</a>)</small></li>" >> public/index.html
+              cadence="unknown"
+              case "$f" in
+                daily_*.md) cadence="daily" ;;
+                weekly_*.md) cadence="weekly" ;;
+                monthly_*.md) cadence="monthly" ;;
+              esac
+              date="${f%.md}"
+              date="${date#*_}"
+              [ "$first" -eq 1 ] || echo "," >> public/digests.js
+              first=0
+              printf '  {"file":"%s","cadence":"%s","date":"%s"}' "$f" "$cadence" "$date" >> public/digests.js
             done
-          else
-            echo '<li>No digests found yet.</li>'                   >> public/index.html
+            echo "" >> public/digests.js
           fi
-          echo '</ul>'                                              >> public/index.html
+          echo "];" >> public/digests.js
 
-          # Serve files as-is and print listing
+          # 4) Finalize
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
