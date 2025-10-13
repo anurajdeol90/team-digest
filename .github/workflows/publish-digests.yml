@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
@@ -33,17 +32,17 @@ jobs:
           set -euo pipefail
           mkdir -p public
 
-          ## 1) Copy optional static site bits
+          # 1) Copy optional static site bits
           if [ -d site ]; then
             cp -r site/* public/ 2>/dev/null || true
           fi
 
-          ## 2) Copy digests (raw .md files)
+          # 2) Copy digests (raw .md files)
           if [ -d outputs ]; then
             cp -r outputs/* public/ || true
           fi
 
-          ## 3) Generate digests.js (for index rendering / search UI)
+          # 3) Generate digests.js (for index rendering / search UI)
           : > public/digests.js
           echo "window.digests = [" >> public/digests.js
           if ls outputs/*.md >/dev/null 2>&1; then
@@ -65,7 +64,7 @@ jobs:
           fi
           echo "];" >> public/digests.js
 
-          ## 4) latest.json (fast links to latest daily/weekly/monthly)
+          # 4) latest.json (fast links to latest daily/weekly/monthly)
           python3 - <<'PY'
 import os, glob, json
 out = {}
@@ -76,7 +75,7 @@ with open("public/latest.json","w") as f:
     json.dump(out, f)
 PY
 
-          ## 5) viewer.html: render a single .md via marked.js
+          # 5) viewer.html: render a single .md via marked.js
           : > public/viewer.html
           cat >> public/viewer.html <<'HTML'
 <!doctype html>
@@ -106,7 +105,7 @@ PY
 </script>
 HTML
 
-          ## 6) index.html: search & filter UI + “Latest” quick links; basic SEO meta
+          # 6) index.html (search/filter UI + Latest links; basic SEO meta)
           : > public/index.html
           cat >> public/index.html <<'HTML'
 <!doctype html>
@@ -167,7 +166,7 @@ HTML
 </script>
 HTML
 
-          ## 7) robots.txt & sitemap.xml for SEO
+          # 7) robots.txt & sitemap.xml for SEO
           cat > public/robots.txt <<'TXT'
 User-agent: *
 Allow: /
@@ -189,7 +188,7 @@ TXT
             echo '</urlset>'
           } > public/sitemap.xml
 
-          ## 8) No-Jekyll & listing
+          # 8) No-Jekyll & listing
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
