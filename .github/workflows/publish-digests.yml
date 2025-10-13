@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p public
-          # 1) Copy static site
+          # 1) Copy static site (index.html, viewer.html, etc.)
           cp -r site/* public/ 2>/dev/null || true
           # 2) Copy digests
           if [ -d outputs ]; then
@@ -42,7 +42,6 @@ jobs:
           if ls outputs/*.md >/dev/null 2>&1; then
             first=1
             for f in $(ls -1 outputs/*.md | xargs -n1 basename | sort -r); do
-              # Infer cadence by prefix; date by suffix
               cadence="unknown"
               case "$f" in
                 daily_*.md) cadence="daily" ;;
@@ -50,7 +49,7 @@ jobs:
                 monthly_*.md) cadence="monthly" ;;
               esac
               date="${f%.md}"
-              date="${date#*_}"   # strip prefix before first underscore
+              date="${date#*_}"
               [ "$first" -eq 1 ] || echo "," >> public/digests.js
               first=0
               printf '  {"file":"%s","cadence":"%s","date":"%s"}' "$f" "$cadence" "$date" >> public/digests.js
@@ -59,7 +58,7 @@ jobs:
           fi
           echo "];" >> public/digests.js
 
-          # 4) .nojekyll and list
+          # 4) Finalize
           touch public/.nojekyll
           echo "=== public listing ==="
           ls -la public
