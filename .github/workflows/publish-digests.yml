@@ -1,4 +1,4 @@
-﻿name: Publish Digests to GitHub Pages
+name: Publish Digests to GitHub Pages
 
 on:
   workflow_dispatch:
