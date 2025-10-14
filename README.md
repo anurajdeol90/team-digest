@@ -97,5 +97,32 @@ Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
 
 Live site: https://<OWNER>.github.io/<REPO>/
 
+---
+
+
+---
+
+# 6) README — quick “change timezone” section
+
+Add/replace **`README.md`** (or append this section if you already have one):
+
+```markdown
+## Time zone configuration (UTC by default)
+
+This project generates digests in **UTC by default**.
+
+### Change it globally
+- Set a repository variable: **Settings → Variables → Actions → New variable**  
+  - Name: `DIGEST_TZ`  
+  - Value: any valid IANA time zone, e.g., `America/New_York`, `Europe/London`, `Asia/Kolkata`.
+
+All scheduled runs (daily/weekly/monthly) and manual runs (unless you override) will use this.
+
+### Change it per manual run
+When you click **Run workflow** for **Publish Digests**, fill the `tz` input with your desired IANA time zone.
+
+> GitHub **cron** always uses **UTC** for scheduling. If you need a specific *local* hour for the job to start, convert that hour to UTC and set the cron in the scheduler workflow.
+
+
 
 

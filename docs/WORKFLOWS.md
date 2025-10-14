@@ -1,11 +1,20 @@
-# Workflows
+# Workflows: manual & scheduled digests
 
-- **Daily Digest**: weekdays 9am CT → `outputs/daily_YYYY-MM-DD.md`
-- **Weekly Digest**: Mondays 9am CT → `outputs/weekly_YYYY-ww.md` or range
-- **Monthly Digest**: 1st of month 9am CT → `outputs/monthly_YYYY-MM.md`
-- **Publish to Pages**: builds `/site` + lists `outputs/*.md` → GitHub Pages
+## Manual runs (Publish Digests)
+Actions → **Publish Digests** → “Run workflow”
 
-Tips:
-- Stagger schedules by a couple of minutes to avoid simultaneous writes.
-- Each writer workflow uses `git pull --rebase` before push to reduce conflicts.
-- If teams want isolation, create multiple repos or namespaced input dirs (e.g., `logs/alpha`).
+Inputs:
+- **digest**: `daily` | `weekly` | `monthly`
+- **date** (optional): `YYYY-MM-DD` for daily/weekly, `YYYY-MM` for monthly
+- **dry run**: if checked, no commit/publish
+- **tz**: IANA time zone (default `UTC`) – affects timestamps in the generated digest
+
+## Automatic runs (Schedules)
+Three workflows call the reusable one:
+- **Daily Digest (schedule)** – runs at the cron time in the file (UTC)
+- **Weekly Digest (schedule)** – cron in UTC
+- **Monthly Digest (schedule)** – cron in UTC
+
+All three pass:
+```yaml
+tz: ${{ vars.DIGEST_TZ || 'UTC' }}

@@ -2,14 +2,15 @@ name: Monthly Digest (schedule)
 
 on:
   schedule:
-    # 1st of the month 9:00 America/Chicago
-    - cron: "0 14 1 * *"
-  workflow_dispatch: {}
+    - cron: "0 16 1 * *"   # 16:00 UTC on the 1st of the month (example)
+  workflow_dispatch:
 
 jobs:
-  call-publish:
+  run:
     uses: ./.github/workflows/publish-digests.yml
     with:
       digest: monthly
-      date: ""
+      date: ""              # auto
       dry_run: false
+      tz: ${{ vars.DIGEST_TZ || 'UTC' }}
+    secrets: inherit
