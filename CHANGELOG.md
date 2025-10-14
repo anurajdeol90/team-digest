@@ -47,3 +47,12 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.0-rc.1] - 2025-10-14
 - Release candidate for v1.0.0
+
+## [1.0.0] - 2025-10-14
+- First stable release
+
+## [1.0.0] - 2025-10-14
+- First stable release
+
+## [1.0.0-rc.2] - 2025-10-14
+- Fix: remove BOM in pyproject; retry RC publish

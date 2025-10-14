@@ -34,7 +34,7 @@ jobs:
           # Optional but nice for reproducibility
           PYTHONUTF8: "1"
 
-      # ✅ Publish via Trusted Publishing (no username/password/ token)
+      # âœ… Publish via Trusted Publishing (no username/password/ token)
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
