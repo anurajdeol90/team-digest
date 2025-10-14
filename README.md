@@ -1,4 +1,4 @@
-# Team Digest
+﻿# Team Digest
 
 [![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml)
 [![Daily Digest](https://github.com/anurajdeol90/team-digest/actions/workflows/daily-digest.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/daily-digest.yml)
@@ -7,18 +7,18 @@
 
 Automated team meeting digests: summarize updates, decisions, risks, and actions into Markdown or JSON, with optional Slack/email notifications.
 
-## 📚 Docs
+## ðŸ“š Docs
 
-- **Configuration** – [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
-- **Workflows & schedules** – [docs/WORKFLOWS.md](docs/WORKFLOWS.md)  
-- **Contributing** – [CONTRIBUTING.md](CONTRIBUTING.md)  
-- **Support** – [docs/SUPPORT.md](docs/SUPPORT.md)  
-- **Security policy** – [SECURITY.md](SECURITY.md)  
-- **Code of Conduct** – [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Configuration** â€“ [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
+- **Workflows & schedules** â€“ [docs/WORKFLOWS.md](docs/WORKFLOWS.md)  
+- **Contributing** â€“ [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)  
+- **Support** â€“ [docs/SUPPORT.md](docs/SUPPORT.md)  
+- **Security policy** â€“ [docs/SECURITY.md](docs/SECURITY.md)  
+- **Code of Conduct** â€“ [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ---
 
-## ✨ Features
+## âœ¨ Features
 - Parse logs or model outputs into structured summaries
 - Export to **Markdown** or **JSON**
 - Optional **Slack** & **Email (SMTP)** notifications
@@ -28,7 +28,7 @@ Automated team meeting digests: summarize updates, decisions, risks, and actions
 
 ---
 
-## 🚀 Quick Start
+## ðŸš€ Quick Start
 
 ### 1) Clone the repository
 ```bash
@@ -55,18 +55,18 @@ team-digest --input logs --format md --config config.json > outputs/local_test.m
 
 ---
 
-## 🧭 Workflows (what gets created)
+## ðŸ§­ Workflows (what gets created)
 
-- **Daily** (weekdays 9am Central) → `outputs/daily_YYYY-MM-DD.md` *(yesterday)*
-- **Weekly** (Mondays 9am Central) → `outputs/weekly_YYYY-WW.md` *(previous week)*
-- **Monthly** (1st @ 9am Central) → `outputs/monthly_YYYY-MM.md` *(previous month)*
+- **Daily** (weekdays 9am Central) â†’ `outputs/daily_YYYY-MM-DD.md` *(yesterday)*
+- **Weekly** (Mondays 9am Central) â†’ `outputs/weekly_YYYY-WW.md` *(previous week)*
+- **Monthly** (1st @ 9am Central) â†’ `outputs/monthly_YYYY-MM.md` *(previous month)*
 
-Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
+Run on demand: **Actions â†’ [workflow] â†’ Run workflow** (branch: `main`).
 
 ---
 
-## 🔧 Repository Configuration  
-**Settings → Secrets and variables → Actions**
+## ðŸ”§ Repository Configuration  
+**Settings â†’ Secrets and variables â†’ Actions**
 
 **Repository variables (optional)**
 - `DIGEST_INPUT_DIR` (default: `logs`)
@@ -78,12 +78,12 @@ Run on demand: **Actions → [workflow] → Run workflow** (branch: `main`).
 
 ---
 
-## ✅ Repo Settings
-- **Settings → Actions → General → Workflow permissions** → **Read and write permissions**
+## âœ… Repo Settings
+- **Settings â†’ Actions â†’ General â†’ Workflow permissions** â†’ **Read and write permissions**
 
 ---
 
-## 🧪 Verify
+## ðŸ§ª Verify
 1. Add at least one file under `logs/` (or your `DIGEST_INPUT_DIR`).  
 2. Run **Daily**, **Weekly**, and **Monthly** manually on `main`.  
 3. Confirm new files appear under `outputs/` and (if configured) Slack/email arrive.
@@ -102,7 +102,7 @@ Live site: https://<OWNER>.github.io/<REPO>/
 
 ---
 
-# 6) README — quick “change timezone” section
+# 6) README â€” quick â€œchange timezoneâ€ section
 
 Add/replace **`README.md`** (or append this section if you already have one):
 
@@ -112,7 +112,7 @@ Add/replace **`README.md`** (or append this section if you already have one):
 This project generates digests in **UTC by default**.
 
 ### Change it globally
-- Set a repository variable: **Settings → Variables → Actions → New variable**  
+- Set a repository variable: **Settings â†’ Variables â†’ Actions â†’ New variable**  
   - Name: `DIGEST_TZ`  
   - Value: any valid IANA time zone, e.g., `America/New_York`, `Europe/London`, `Asia/Kolkata`.
 
@@ -126,3 +126,12 @@ When you click **Run workflow** for **Publish Digests**, fill the `tz` input wit
 
 
 
+
+
+# Documentation
+
+- [Configuration](docs/CONFIGURATION.md)
+- [Workflows](docs/WORKFLOWS.md)
+- [Support](docs/SUPPORT.md)
+- [Security](docs/SECURITY.md)
+- [Contributing](docs/CONTRIBUTING.md)

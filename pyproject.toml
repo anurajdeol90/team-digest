@@ -4,43 +4,37 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "team-digest"
-# Read version from team_digest_version.py
-dynamic = ["version"]
+version = "1.0.0-rc.1"  # static version to avoid import-at-build
 description = "Generate team digests from logs/emails, post to Slack, and automate on Windows."
 readme = "README.md"
-requires-python = ">=3.11"
-# Use SPDX string to avoid deprecation warnings
-license = "MIT"  # SPDX string; replaces any table like {text = "..."} or {file = "..."}
+requires-python = ">=3.9"  # widen if you can; keep >=3.11 if you must
+license = { text = "MIT" }  # or { text = "Apache-2.0" }
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Operating System :: OS Independent",
+  "License :: OSI Approved :: MIT License",
 ]
 
-# Runtime dependencies only
 dependencies = [
-  "PyYAML>=6",
-  "python-dateutil>=2.8",
-  "regex>=2023.0",
-  "requests>=2.31",
-  "tqdm>=4.65",
+  "PyYAML>=6,<7",
+  "python-dateutil>=2.8,<3",
+  "regex>=2023.0.0",
+  "requests>=2.31,<3",
+  "tqdm>=4.65,<5",
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org-or-user/team-digest"
-Issues = "https://github.com/your-org-or-user/team-digest/issues"
+Homepage = "https://github.com/anurajdeol90/team-digest"
+Issues = "https://github.com/anurajdeol90/team-digest/issues"
 
-# Console entry point
 [project.scripts]
 team-digest = "team_email_digest:main"
 
 [tool.setuptools]
-# Ship a single-module CLI; disable auto discovery to avoid picking up stray dirs
-license-files = ["LICENSE"]
-py-modules = ["team_email_digest", "team_digest_version"] 
+# single-module distribution; no package discovery needed
+py-modules = ["team_email_digest"]  # keep team_digest_version if you still ship it, but don't use it for version
 
-[tool.setuptools.packages.find]
-exclude = ["tests", "docs", "logs", "outputs"]     
-
-[tool.setuptools.dynamic]
-version = { attr = "team_digest_version.__version__" }
+[tool.setuptools.package-data]
+# add data files here if/when you embed templates or schemas
+# team_digest = ["templates/*", "schemas/*.json"]

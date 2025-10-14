@@ -1,11 +1,15 @@
 # Core docs
 include README.md
 include LICENSE
-include config.yaml
+include CHANGELOG.md
 
-# Include documentation files if needed
-recursive-include docs *
+# Package data (if you add these later, keep them)
+# recursive-include team_digest/templates *
+# recursive-include team_digest/schemas *.json
 
-# Explicitly exclude runtime/generated directories
+# Exclude runtime/generated directories
 prune logs
 prune outputs
+prune site
+prune __pycache__
+prune .pytest_cache
