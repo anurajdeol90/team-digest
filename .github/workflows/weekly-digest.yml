@@ -2,14 +2,15 @@ name: Weekly Digest (schedule)
 
 on:
   schedule:
-    # Mondays 9:00 America/Chicago
-    - cron: "0 14 * * 1"
-  workflow_dispatch: {}
+    - cron: "0 15 * * 5"   # 15:00 UTC every Friday (example)
+  workflow_dispatch:
 
 jobs:
-  call-publish:
+  run:
     uses: ./.github/workflows/publish-digests.yml
     with:
       digest: weekly
-      date: ""
+      date: ""              # auto
       dry_run: false
+      tz: ${{ vars.DIGEST_TZ || 'UTC' }}
+    secrets: inherit

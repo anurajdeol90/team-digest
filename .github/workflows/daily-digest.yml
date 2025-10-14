@@ -1,17 +1,17 @@
 name: Daily Digest (schedule)
 
 on:
+  # GitHub cron is always evaluated in UTC. Adjust the minutes/hour as needed.
   schedule:
-    # Weekdays 9:00 America/Chicago (adjust as needed)
-    - cron: "0 14 * * 1-5"
-  workflow_dispatch: {}
+    - cron: "0 14 * * 1-5"  # 14:00 UTC Mon-Fri (example)
+  workflow_dispatch:
 
 jobs:
-  call-publish:
+  run:
     uses: ./.github/workflows/publish-digests.yml
     with:
       digest: daily
-      # leave date blank so the script auto-picks today
-      date: ""
-      # set to false to actually commit/publish on the schedule
+      date: ""              # auto
       dry_run: false
+      tz: ${{ vars.DIGEST_TZ || 'UTC' }}
+    secrets: inherit
