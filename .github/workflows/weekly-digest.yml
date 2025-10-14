@@ -1,129 +1,15 @@
-name: Weekly Digest (Mondays 9am CT)
+name: Weekly Digest (schedule)
 
 on:
-  workflow_dispatch:
   schedule:
-    # 9am CDT (UTC-5) → 14:00 UTC, Mondays
+    # Mondays 9:00 America/Chicago
     - cron: "0 14 * * 1"
-    # 9am CST (UTC-6) → 15:00 UTC, Mondays
-    - cron: "0 15 * * 1"
-
-permissions:
-  contents: write
-
-concurrency:
-  group: weekly-digest
-  cancel-in-progress: true
+  workflow_dispatch: {}
 
 jobs:
-  weekly:
-    runs-on: ubuntu-latest
-    env:
-      INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      DIGEST_EMAIL_FROM: ${{ secrets.DIGEST_EMAIL_FROM }}
-      DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install team-digest
-        run: |
-          python -m pip install --upgrade pip
-          pip install "team-digest>=0.1.10,<0.2"
-
-      - name: Compute previous week window (America/Chicago)
-        id: window
-        run: |
-          # Previous week: Monday 00:00 to Sunday 23:59:59 in CT
-          THIS_MONDAY=$(TZ=America/Chicago date -d "monday this week 00:00" +%F' '%T)
-          START_DATE=$(TZ=America/Chicago date -d "$THIS_MONDAY -7 days" +%F' '%T)
-          END_DATE=$(TZ=America/Chicago date -d "$THIS_MONDAY -1 second" +%F' '%T)
-          LABEL=$(TZ=America/Chicago date -d "$START_DATE" +%G-%V)  # ISO year-week
-          echo "start=$START_DATE" >> $GITHUB_OUTPUT
-          echo "end=$END_DATE" >> $GITHUB_OUTPUT
-          echo "label=$LABEL" >> $GITHUB_OUTPUT
-
-      - name: Ensure input dir exists
-        run: |
-          IN="${INPUT_DIR:-logs}"
-          mkdir -p "$IN"
-
-      - name: Generate digest markdown
-        run: |
-          mkdir -p outputs
-          OUT="outputs/weekly_${{ steps.window.outputs.label }}.md"
-          team-digest --input "${INPUT_DIR:-logs}" --format md \
-            --from "${{ steps.window.outputs.start }}" \
-            --to   "${{ steps.window.outputs.end }}" > "$OUT"
-          echo "OUTFILE=$OUT" >> $GITHUB_ENV
-
-      - name: Sync with remote (rebase safely)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git stash push -u -m "digest-pre-rebase" || true
-          git pull --rebase origin main
-          git stash pop || true
-          git status --porcelain
-
-      - name: Commit digest to repo
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(digest): add ${{ env.OUTFILE }}"
-          file_pattern: outputs/*.md
-          # push_options: '--force-with-lease'   # optional safety net
-
-      - name: Post to Slack (optional)
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        uses: slackapi/slack-github-action@v1.27.0
-        with:
-          payload: |
-            {
-              "text": ":calendar: Weekly digest for ${{ steps.window.outputs.label }} is ready.\n${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-
-      - name: Email digest (optional)
-        if: "${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}"
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "Weekly Team Digest (${{ steps.window.outputs.label }})"
-          from: ${{ secrets.DIGEST_EMAIL_FROM }}
-          to: ${{ secrets.DIGEST_EMAIL_TO }}
-          secure: true
-          convert_markdown: true
-          body: |
-            Weekly digest is attached and committed to the repo.
-            ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}
-          attachments: ${{ env.OUTFILE }}
-
-      - name: Notify failure to Slack (optional)
-        if: failure() && env.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.27.0
-        with:
-          payload: |
-            {
-              "text": ":warning: *Weekly Digest* failed on `${{ github.ref }}`.\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+  call-publish:
+    uses: ./.github/workflows/publish-digests.yml
+    with:
+      digest: weekly
+      date: ""
+      dry_run: false

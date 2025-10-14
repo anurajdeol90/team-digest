@@ -1,127 +1,17 @@
-name: Daily Digest (weekdays 9am CT)
+name: Daily Digest (schedule)
 
 on:
-  workflow_dispatch:
   schedule:
-    # 9am CDT (UTC-5) → 14:00 UTC, Mon–Fri
+    # Weekdays 9:00 America/Chicago (adjust as needed)
     - cron: "0 14 * * 1-5"
-    # 9am CST (UTC-6) → 15:00 UTC, Mon–Fri
-    - cron: "0 15 * * 1-5"
-
-permissions:
-  contents: write
-
-concurrency:
-  group: daily-digest
-  cancel-in-progress: true
+  workflow_dispatch: {}
 
 jobs:
-  daily:
-    runs-on: ubuntu-latest
-    env:
-      INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      DIGEST_EMAIL_FROM: ${{ secrets.DIGEST_EMAIL_FROM }}
-      DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install team-digest
-        run: |
-          python -m pip install --upgrade pip
-          pip install "team-digest>=0.1.10,<0.2"
-
-      - name: Compute yesterday window (America/Chicago)
-        id: window
-        run: |
-          TZ=America/Chicago date
-          START_DATE=$(TZ=America/Chicago date -d "yesterday 00:00" +%F' '%T)
-          END_DATE=$(TZ=America/Chicago date -d "yesterday 23:59:59" +%F' '%T)
-          echo "start=$START_DATE" >> $GITHUB_OUTPUT
-          echo "end=$END_DATE" >> $GITHUB_OUTPUT
-          echo "label=$(TZ=America/Chicago date -d 'yesterday' +%F)" >> $GITHUB_OUTPUT
-
-      - name: Ensure input dir exists
-        run: |
-          IN="${INPUT_DIR:-logs}"
-          mkdir -p "$IN"
-
-      - name: Generate digest markdown
-        run: |
-          mkdir -p outputs
-          OUT="outputs/daily_${{ steps.window.outputs.label }}.md"
-          team-digest --input "${INPUT_DIR:-logs}" --format md \
-            --from "${{ steps.window.outputs.start }}" \
-            --to   "${{ steps.window.outputs.end }}" > "$OUT"
-          echo "OUTFILE=$OUT" >> $GITHUB_ENV
-
-      - name: Sync with remote (rebase safely)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git stash push -u -m "digest-pre-rebase" || true
-          git pull --rebase origin main
-          git stash pop || true
-          git status --porcelain
-
-      - name: Commit digest to repo
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(digest): add ${{ env.OUTFILE }}"
-          file_pattern: outputs/*.md
-          # push_options: '--force-with-lease'   # optional safety net
-
-      - name: Post to Slack (optional)
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        uses: slackapi/slack-github-action@v1.27.0
-        with:
-          payload: |
-            {
-              "text": ":newspaper: Daily digest for ${{ steps.window.outputs.label }} is ready.\n${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-
-      - name: Email digest (optional)
-        if: "${{ env.SMTP_SERVER != '' && env.DIGEST_EMAIL_TO != '' }}"
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "Daily Team Digest (${{ steps.window.outputs.label }})"
-          from: ${{ secrets.DIGEST_EMAIL_FROM }}
-          to: ${{ secrets.DIGEST_EMAIL_TO }}
-          secure: true
-          convert_markdown: true
-          body: |
-            Daily digest is attached and committed to the repo.
-            ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ env.OUTFILE }}
-          attachments: ${{ env.OUTFILE }}
-
-      - name: Notify failure to Slack (optional)
-        if: failure() && env.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.27.0
-        with:
-          payload: |
-            {
-              "text": ":warning: *Daily Digest* failed on `${{ github.ref }}`.\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+  call-publish:
+    uses: ./.github/workflows/publish-digests.yml
+    with:
+      digest: daily
+      # leave date blank so the script auto-picks today
+      date: ""
+      # set to false to actually commit/publish on the schedule
+      dry_run: false
