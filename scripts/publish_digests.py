@@ -1,65 +1,64 @@
 #!/usr/bin/env python3
-"""
-Minimal digest generator used by the GitHub Actions workflow.
+import argparse
+import datetime
+from pathlib import Path
+import textwrap
 
-Reads DIGEST, DATE, DRY_RUN from env vars (set by Makefile) and
-creates a simple artifact under ./digests/<digest>/<YYYY-MM-DD>.md
-
-Safe defaults:
-- DIGEST: daily
-- DATE: today (UTC)
-- DRY_RUN: true  -> no files written
-"""
-from __future__ import annotations
-import os, sys, pathlib, datetime as dt
-
-def log(msg: str) -> None:
-    print(f"[digest] {msg}", flush=True)
-
-def main() -> int:
-    digest = (os.environ.get("DIGEST") or "daily").strip().lower()
-    date_str = (os.environ.get("DATE") or "").strip()
-    dry_run = (os.environ.get("DRY_RUN") or "true").strip().lower() in ("1","true","yes","y")
-
-    if digest not in {"daily","weekly","monthly"}:
-        log(f"Unsupported digest '{digest}'. Use daily|weekly|monthly.")
-        return 2
-
-    # parse date or use today (UTC)
-    if date_str:
-        try:
-            day = dt.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            log(f"Invalid DATE '{date_str}'. Expected YYYY-MM-DD.")
-            return 2
+def infer_default_date(digest_type: str) -> str:
+    today = datetime.date.today()
+    if digest_type == "daily":
+        return today.isoformat()
+    elif digest_type == "weekly":
+        return f"{today.year}-W{today.isocalendar().week:02d}"
+    elif digest_type == "monthly":
+        return f"{today.year}-{today.month:02d}"
     else:
-        day = dt.datetime.utcnow().date()
+        raise ValueError(f"Unknown digest type: {digest_type}")
 
-    log(f"Running for digest='{digest}', date={day.isoformat()}, dry_run={dry_run}")
+def sample_content(digest_type: str, date_str: str) -> str:
+    today = datetime.date.today().isoformat()
+    return textwrap.dedent(f"""\
+    # {digest_type.title()} Digest — {date_str}
 
-    # Generate a minimal file that is safe for Pages
-    out_dir = pathlib.Path("digests") / digest
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{day.isoformat()}.md"
+    Generated automatically on {today}.
 
-    content = f"""---
-title: {digest.capitalize()} Digest — {day.isoformat()}
-date: {day.isoformat()}
----
+    ## Summary
+    - Key project updates summarized here.
+    - Example: Alpha budget approved with extra funding.
 
-This is a placeholder {digest} digest for **{day.isoformat()}**.
-(Replace this with your real generation logic.)
-"""
+    ## Decisions
+    - Decision 1
+    - Decision 2
 
-    if dry_run:
-        log(f"[DRY RUN] Would write: {out_file}")
-        log(f"[DRY RUN] Content preview (first 200 chars): {content[:200]!r}")
+    ## Actions
+    - [ ] Task 1 — Owner (due date)
+    - [ ] Task 2 — Owner (due date)
+
+    ---
+    """)
+    
+def main():
+    parser = argparse.ArgumentParser(description="Publish team digests")
+    parser.add_argument("--digest", required=True, choices=["daily", "weekly", "monthly"], help="Digest type")
+    parser.add_argument("--date", default="", help="Date (defaults based on digest type)")
+    parser.add_argument("--dry-run", action="store_true", help="Do not write files, just print")
+    args = parser.parse_args()
+
+    digest_type = args.digest
+    date_str = args.date or infer_default_date(digest_type)
+
+    out_dir = Path("outputs")
+    out_dir.mkdir(exist_ok=True)
+
+    filename = f"{digest_type}_{date_str}.md"
+    filepath = out_dir / filename
+    content = sample_content(digest_type, date_str)
+
+    if args.dry_run:
+        print(f"[DRY RUN] Would write {filepath}:\n{content}")
     else:
-        out_file.write_text(content, encoding="utf-8")
-        log(f"Wrote {out_file.relative_to(pathlib.Path.cwd())}")
-
-    log("Done.")
-    return 0
+        filepath.write_text(content, encoding="utf-8")
+        print(f"✅ Wrote {filepath}")
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
