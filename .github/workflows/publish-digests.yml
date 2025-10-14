@@ -23,7 +23,7 @@ on:
         required: false
         default: UTC
 
-  # Allow this workflow to be called by other workflows (our schedulers)
+  # Reusable workflow inputs for scheduler callers
   workflow_call:
     inputs:
       digest:
@@ -41,13 +41,15 @@ on:
         type: string
         required: false
         default: "UTC"
-    secrets:
-      inherit: true
+    # ❌ Do NOT put `secrets: inherit` here. Callers will set that.
 
 jobs:
   build:
     name: Build / Generate digest
     runs-on: ubuntu-latest
+    # If you auto-commit or deploy, you likely need these:
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -74,10 +76,8 @@ jobs:
             DRY_RUN=${{ inputs.dry_run && 'true' || 'false' }} \
             TZ="${{ inputs.tz || 'UTC' }}"
 
-      # If your repo publishes to Pages or sends email, keep those steps here.
-      # This block only runs on non-dry runs from `main`.
-      # (Leave it as-is if you already have working publish/email steps.)
+      # Optional publish step – only on non-dry runs to main
       - name: (Optional) Publish / Deploy
         if: ${{ !inputs.dry_run && github.ref == 'refs/heads/main' }}
         run: |
-          echo "Production publish step goes here (kept minimal to not break your current setup)."
+          echo "Production publish step goes here."

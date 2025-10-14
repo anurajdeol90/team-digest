@@ -1,1 +1,18 @@
+# Auto-detect text files and normalize line endings
+* text=auto eol=lf
+
+# Treat Python scripts as text
+*.py text
+
+# Ensure YAML files use LF
 *.yml text eol=lf
+
+# Ensure Markdown files use LF
+*.md text eol=lf
+
+# Binary files (don’t diff)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
