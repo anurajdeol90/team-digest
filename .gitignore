@@ -1,31 +1,37 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-.env
+
+# Environments
 .venv/
+venv/
+.env
 .env.*
-.build/
+
+# Build artifacts
 dist/
+build/
 *.egg-info/
 
-# Project outputs
-outputs/
-logs/*.log
+# Tools & caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# OS
+# OS / editor
 .DS_Store
 Thumbs.db
-Sample.txt
 
-# Track generated weekly digests 
-
-# Ignore outputs except weekly artifacts
+# Project outputs (keep a placeholder under logs/)
 outputs/
-!outputs/
-!outputs/weekly_*.md
-
-# Ignore real logs but keep placeholder
-logs/*
+logs/
 !logs/.gitkeep
+
+# Site builds (MkDocs / Pages)
+site/
+
+# Zips / scratch
+*.zip
+out.json
