@@ -59,3 +59,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.0] - 2025-10-14
 - First stable release
+
+## [1.0.0] - 2025-10-14
+- First stable release
