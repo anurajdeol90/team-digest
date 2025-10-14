@@ -36,12 +36,15 @@ def sample_content(digest_type: str, date_str: str) -> str:
 
     ---
     """)
-    
+
 def main():
     parser = argparse.ArgumentParser(description="Publish team digests")
     parser.add_argument("--digest", required=True, choices=["daily", "weekly", "monthly"], help="Digest type")
     parser.add_argument("--date", default="", help="Date (defaults based on digest type)")
-    parser.add_argument("--dry-run", action="store_true", help="Do not write files, just print")
+    # Dual flags so CI/Make can pass true/false sanely
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", help="Preview only (default)")
+    parser.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="Actually write files")
+    parser.set_defaults(dry_run=True)
     args = parser.parse_args()
 
     digest_type = args.digest
