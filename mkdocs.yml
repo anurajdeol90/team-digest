@@ -1,0 +1,19 @@
+﻿site_name: Team Digest
+site_description: Turn scattered team updates into clean daily/weekly/monthly digests.
+repo_url: https://github.com/anurajdeol90/team-digest
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - content.code.copy
+nav:
+  - Home: docs/index.md
+  - Configuration: docs/CONFIGURATION.md
+  - Workflows: docs/WORKFLOWS.md
+  - Support: docs/SUPPORT.md
+  - Security: docs/SECURITY.md
+  - Contributing: docs/CONTRIBUTING.md
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
