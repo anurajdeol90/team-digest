@@ -1,178 +1,53 @@
-name: Publish Digests
+name: Publish Digests to GitHub Pages
 
 on:
-  # Keeps the "Run workflow" button visible
   workflow_dispatch:
     inputs:
-      digest:
-        description: "Which digest to generate?"
+      cadence:
+        description: "Which digest cadence?"
+        required: true
+        default: "daily"
         type: choice
-        required: true
-        default: daily
-        options: [daily, weekly, monthly]
-      date:
-        description: "Override date (YYYY-MM-DD). Leave empty for today."
-        required: false
-        type: string
-      dry_run:
-        description: "Preview only (no side effects in your scripts)"
-        required: true
-        type: boolean
-        default: true
-      deploy:
-        description: "Deploy to GitHub Pages (allowed on main only)"
-        required: true
-        type: boolean
-        default: false
-      ref:
-        description: "Optional git ref to checkout (branch/tag/SHA). Default = trigger ref."
-        required: false
-        type: string
+        options:
+          - daily
+          - weekly
+          - monthly
+  schedule:
+    - cron: "0 9 * * *" # optional daily auto-run at 9am UTC
 
-  # optional: keep or remove if you don't want any automatic runs
-  # schedule:
-  #   - cron: "0 9 * * 1-5"   # 9:00 UTC weekdays (daily)
-  #   - cron: "0 9 * * 1"     # Mondays (weekly)
-  #   - cron: "0 9 1 * *"     # 1st of month (monthly)
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
-# Guard against double-runs on the same ref
 concurrency:
-  group: publish-digests-${{ github.ref }}
+  group: pages
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build / Generate digest
     runs-on: ubuntu-latest
-
-    # Least-privilege by default
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          # allow overriding the ref when running manually
-          ref: ${{ inputs.ref || github.ref }}
-
-      # If your digest generator is Python, this is ready-to-go.
-      # If you don't need Python, it's harmless and fast.
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Show inputs (debug)
-        run: |
-          echo "digest=${{ inputs.digest }}"
-          echo "date=${{ inputs.date }}"
-          echo "dry_run=${{ inputs.dry_run }}"
-          echo "deploy=${{ inputs.deploy }}"
-          echo "ref=${{ inputs.ref || github.ref }}"
-
-      # ---- Generate your digest(s) ---------------------------------------------------
-      # Replace this step with your real generator, or keep this smart shim:
-      # It checks for common commands/scripts and runs what exists.
-      - name: Generate digest
-        id: gen
-        shell: bash
-        env:
-          DIGEST: ${{ inputs.digest }}
-          DATE_OVERRIDE: ${{ inputs.date }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          set -euo pipefail
-
-          # Prefer a Make target if present
-          if grep -qE '^digest:' Makefile 2>/dev/null; then
-            echo "→ Running: make digest DIGEST=$DIGEST DATE=$DATE_OVERRIDE DRY_RUN=$DRY_RUN"
-            make digest DIGEST="$DIGEST" DATE="$DATE_OVERRIDE" DRY_RUN="$DRY_RUN"
-          # Prefer an npm script if present
-          elif [ -f package.json ] && jq -e '.scripts.digest' package.json >/dev/null 2>&1; then
-            echo "→ Running: npm run digest -- DIGEST=$DIGEST DATE=$DATE_OVERRIDE DRY_RUN=$DRY_RUN"
-            npm ci --no-audit --no-fund || true
-            npm run digest -- "DIGEST=$DIGEST" "DATE=$DATE_OVERRIDE" "DRY_RUN=$DRY_RUN"
-          # Prefer a Python script if present
-          elif [ -f scripts/publish_digests.py ]; then
-            echo "→ Running: python scripts/publish_digests.py"
-            python -m pip install -U pip wheel setuptools >/dev/null
-            # If your repo has requirements, uncomment:
-            # [ -f requirements.txt ] && pip install -r requirements.txt
-            python scripts/publish_digests.py \
-              --type "$DIGEST" \
-              ${DATE_OVERRIDE:+--date "$DATE_OVERRIDE"} \
-              $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" || true )
-          else
-            echo "::warning::No known digest command found. Create one of: \
-              'make digest', 'npm run digest', or 'scripts/publish_digests.py'."
-          fi
-
-          # Detect a site/output folder to archive & optionally deploy
-          SITE_DIR=""
-          for d in "dist" "build" "public" "site" "out"; do
-            if [ -d "$d" ]; then SITE_DIR="$d"; break; fi
-          done
-
-          if [ -n "$SITE_DIR" ]; then
-            echo "site_dir=$SITE_DIR" >> "$GITHUB_OUTPUT"
-            echo "Found site dir: $SITE_DIR"
-          else
-            echo "site_dir=" >> "$GITHUB_OUTPUT"
-            echo "::notice::No site directory found; skipping artifact/deploy."
-          fi
-
-      - name: Upload digest artifact
-        if: ${{ steps.gen.outputs.site_dir != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ inputs.digest }}-${{ github.run_number }}
-          path: ${{ steps.gen.outputs.site_dir }}
-          if-no-files-found: warn
-          retention-days: 7
-
-  deploy:
-    name: Deploy to GitHub Pages (main only, when requested)
-    needs: build
-    runs-on: ubuntu-latest
-    # Only allow deploy when:
-    #  - we're on main
-    #  - the manual input deploy=true
-    #  - and the build produced a site_dir
-    if: >
-      github.ref == 'refs/heads/main' &&
-      inputs.deploy == 'true' &&
-      needs.build.outputs.gen_site_dir != ''
-    # Elevated perms only for this job
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-
-    # expose site_dir from prior job
-    outputs:
-      site_dir: ${{ steps.resolve.outputs.site_dir }}
-
-    steps:
-      - name: Resolve site dir from previous job
-        id: resolve
-        shell: bash
-        run: |
-          # Pull the value from the build job output via the REST API-compatible env
-          echo "site_dir=${{ needs.build.outputs.gen_site_dir }}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout (for upload-pages-artifact relative path)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Pages artifact
+      - name: Run digest generator
+        run: |
+          make ${{ github.event.inputs.cadence }} DRY_RUN=false
+
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ needs.build.outputs.gen_site_dir }}
+          path: outputs
 
-      - name: Deploy to Pages
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
         uses: actions/deploy-pages@v4
