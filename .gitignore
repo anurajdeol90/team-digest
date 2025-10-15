@@ -29,3 +29,9 @@ outputs/
 !examples/
 !examples/logs/
 !examples/logs/**
+customer_test/
+dist/
+build/
+*.egg-info/
+out/
+pyproject_repair.ps1
