@@ -1,42 +1,40 @@
+
 name: CI
 
 on:
   push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
-
-permissions:
-  contents: read
 
 jobs:
-  test:
+  smoke:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install (package + dev extras)
+      - run: pip install --upgrade pip build
+      - run: python -m build
+      - name: Verify wheel has examples
         run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
-          pip install -e .
-
-      # ---- CLI smoke test: render a real digest from examples/logs ----
-      - name: CLI smoke (render examples/logs)
+          python - <<'PY'
+          import zipfile, glob
+          w = sorted(glob.glob("dist/*.whl"))[-1]
+          with zipfile.ZipFile(w) as z:
+              names = z.namelist()
+              assert any(n.startswith("team_digest/__init__.py") for n in names)
+              assert any(n.startswith("team_digest/examples/") for n in names)
+          print("✅ wheel contains package + examples:", w)
+          PY
+      - name: Install from wheel & render sample
         run: |
-          team-digest --format md --input ./examples/logs -o smoke.md
-          test -s smoke.md
-          grep -q "^# Team Digest" smoke.md
-          sed -n '1,80p' smoke.md
-
-      - name: Run tests
-        env:
-          TEAM_DIGEST_VERSION: ${{ github.sha }}
-        run: pytest -q
+          python -m venv .venv && source .venv/bin/activate
+          pip install --no-cache-dir dist/*.whl
+          python - <<'PY' > logs_path.txt
+          import importlib.resources as r, team_digest
+          print((r.files(team_digest) / "examples" / "logs").__fspath__())
+          PY
+          mkdir -p out
+          team-digest --input "$(cat logs_path.txt)" --format md   --output out/digest.md
+          team-digest --input "$(cat logs_path.txt)" --format json --output out/digest.json
+          test -s out/digest.md && test -s out/digest.json

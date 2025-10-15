@@ -1,0 +1,2 @@
+[console_scripts]
+team-digest = team_email_digest:main

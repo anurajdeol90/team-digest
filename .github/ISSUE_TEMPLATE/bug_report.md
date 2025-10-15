@@ -1,21 +1,24 @@
+
 ---
 name: Bug report
-about: Something broken? Tell us.
+about: Create a report to help us improve
+title: "[Bug] "
 labels: bug
+assignees: ""
 ---
 
-**What happened?**
-Describe the issue concisely.
+**Describe the bug**
+A clear and concise description of what the bug is.
 
-**Steps to reproduce**
-1.
-2.
-3.
+**To Reproduce**
+Steps to reproduce the behavior.
 
-**Expected**
-What should have happened?
+**Expected behavior**
+What you expected to happen.
 
-**Context**
+**Environment**
 - OS:
-- `team-digest --version`:
-- Relevant logs (redact secrets):
+- Python:
+- team-digest version: `team-digest --version`
+
+**Additional context**

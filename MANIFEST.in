@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include VERSION
+
+graft team_digest
+recursive-include team_digest/examples *.md *.json *.yml *.yaml
+
+exclude Makefile
+exclude pytest.ini
+exclude requirements*.txt
+exclude digest.bat
+prune .git

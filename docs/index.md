@@ -1,14 +1,36 @@
-# Team Digest
 
-Automate team updates into clean **Markdown** or **JSON** digests. Point it at your notes/logs, and (optionally) send the result to **Slack** on a daily, weekly, or monthly schedule.
+# Team Digest — Documentation
 
-> Install in seconds. Works on Windows, macOS, and Linux.
+Welcome! This guide helps you install, try the examples, post to Slack, and schedule digests.
 
----
+## Install
+```bash
+pip install team-digest
+team-digest --version
+```
 
-## Quick Start
+## Try the bundled example
+```bash
+python - <<'PY'
+import importlib.resources as r, team_digest
+print((r.files(team_digest) / "examples" / "logs").__fspath__())
+PY
+```
 
-### Windows (PowerShell)
-```powershell
-# Write first digest to outputs\first.md using the included example logs
-if (-not (Test-Path outputs)) { New-Item -ItemType Directory outputs | Out-Null }; team-digest --input .\examples\logs --format md > .\outputs\first.md
+## Render outputs
+```bash
+LOGS_DIR="$(python - <<'PY'
+import importlib.resources as r, team_digest
+print((r.files(team_digest) / "examples" / "logs").__fspath__())
+PY
+)"
+team-digest --input "$LOGS_DIR" --format md   --output digest.md
+team-digest --input "$LOGS_DIR" --format json --output digest.json
+```
+
+## Slack
+Set `TEAM_DIGEST_SLACK_WEBHOOK` and add `--post slack`.
+
+## Schedules
+- GitHub Actions: see templates in `.github/workflows/`
+- Windows Task Scheduler / cron: run the same CLI on your cadence.

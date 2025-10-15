@@ -1,14 +1,19 @@
+
 ---
 name: Feature request
-about: Suggest an idea
+about: Suggest an idea for Team Digest
+title: "[Feature] "
 labels: enhancement
+assignees: ""
 ---
 
 **Problem**
-What job-to-be-done is missing?
+What problem would this feature solve?
 
 **Proposal**
-What would help?
+Describe the solution you'd like.
 
-**Nice to have**
-Any extras, UI ideas, or examples.
+**Alternatives**
+Any alternative solutions or features you've considered?
+
+**Additional context**

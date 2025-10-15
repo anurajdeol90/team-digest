@@ -24,11 +24,13 @@ Homepage = "https://github.com/anurajdeol90/team-digest"
 Issues    = "https://github.com/anurajdeol90/team-digest/issues"
 
 [project.scripts]
-# Point this to the module that actually defines main()
+# If your CLI main() is in team_email_digest.py (recommended now):
 team-digest = "team_email_digest:main"
+# If you later move main() elsewhere, update the target accordingly.
 
 [tool.setuptools]
 include-package-data = true
+# Keep these top-level modules available so the CLI target can import them:
 py-modules = ["team_email_digest","team_digest_runtime","slack_delivery","team_digest_version"]
 
 [tool.setuptools.packages.find]
@@ -36,5 +38,5 @@ where = ["."]
 include = ["team_digest*"]
 
 [tool.setuptools.package-data]
+# Ship the examples inside the wheel for customers
 team_digest = ["examples/**"]
-

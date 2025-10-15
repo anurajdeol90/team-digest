@@ -1,37 +1,28 @@
-# Byte-compiled / cache
+# Python
 __pycache__/
-*.py[cod]
-*.pyo
 *.pyc
+*.pyo
 *.pyd
+*.egg-info/
+.eggs/
 
-# Build / dist
+# Builds / dist
 build/
 dist/
-*.egg-info/
+wheelhouse/
 
-# Virtual envs
-.venv*/
+# Local envs
 .venv/
+.publish/
+env/
 venv/
 
-# Test caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Local outputs and logs
-logs/
-outputs/
-*.log
-
-# Keep example logs in the repo (override previous ignore rules)
-!examples/
-!examples/logs/
-!examples/logs/**
-customer_test/
-dist/
-build/
-*.egg-info/
+# Local outputs & scratch
 out/
+customer_test/
 pyproject_repair.ps1
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
