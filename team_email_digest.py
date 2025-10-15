@@ -52,12 +52,12 @@ SECTION_ALIASES: Dict[str, List[str]] = {
 # Header like "Summary", "## Summary", "Summary:", or "Summary: inline text"
 HEADER_RE = re.compile(r"^\s*(?:#+\s*)?([A-Za-z][A-Za-z\s_-]+?)\s*:?\s*(.*)$")
 
-# Bullet formats: -, *, ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢, "1. ", "(1) ", checkbox "[ ]", "[x]"
-BULLET_RE = re.compile(r"^\s*(?:[-*ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢]\s+|\d+\.\s+|\(\d+\)\s+|\[\s*\]\s+|\[\s*x\s*\]\s+)")
+# Bullet formats: -, *, ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢, "1. ", "(1) ", checkbox "[ ]", "[x]"
+BULLET_RE = re.compile(r"^\s*(?:[-*ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢]\s+|\d+\.\s+|\(\d+\)\s+|\[\s*\]\s+|\[\s*x\s*\]\s+)")
 
 # Loose "KV" action parser: "Title | owner: X | due: 2025-10-08 | priority: high"
 ACTION_KV_RE = re.compile(
-    r"(?i)^\s*(?P<title>[^|;:\u2014]+?)\s*(?:[|;:ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â-]{1,2}\s*)?"
+    r"(?i)^\s*(?P<title>[^|;:\u2014]+?)\s*(?:[|;:ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â-]{1,2}\s*)?"
     r"(?:owner\s*[:\-]\s*(?P<owner>[^|;]+))?\s*(?:[|;]\s*)?"
     r"(?:due\s*[:\-]\s*(?P<due>\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}))?\s*(?:[|;]\s*)?"
     r"(?:priority\s*[:\-]\s*(?P<priority>p?\d|low|medium|high))?\s*$"
@@ -223,7 +223,7 @@ def parse_sections(text: str) -> Dict[str, List[str]]:
             continue
 
         # Fast-path robust header detection
-        low = line.lower().lstrip("#*ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ ").strip()
+        low = line.lower().lstrip("#*ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ ").strip()
         for alias, key in [
             ("summary", "summary"),
             ("decisions", "decisions"),
@@ -301,7 +301,7 @@ def render_markdown(d: Dict[str, object]) -> str:
     out.append(hdr("Summary"))
     summary: List[str] = d.get("summary", []) or []
     if len(summary) <= 1:
-        out.append((summary[0] if summary else "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â") + "\n")
+        out.append((summary[0] if summary else "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â") + "\n")
     else:
         out.append(bullets(summary))
 
@@ -313,12 +313,12 @@ def render_markdown(d: Dict[str, object]) -> str:
     ]:
         out.append(hdr(title))
         items: List[str] = d.get(key, []) or []
-        out.append(bullets(items) if items else "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â\n")
+        out.append(bullets(items) if items else "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â\n")
 
     out.append(hdr("Actions"))
     actions = d.get("actions", []) or []
     if not actions:
-        out.append("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â\n")
+        out.append("ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â\n")
     else:
         out.append("| Title | Owner | Due | Priority |\n|---|---|---|---|\n")
         for a in actions:
@@ -579,7 +579,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
     if not p.exists():
         if strict:
             raise FileNotFoundError(f"Config file not found: {path}")
-        _vprint(verbose, f"[warn] config not found: {path} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â using defaults")
+        _vprint(verbose, f"[warn] config not found: {path} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â using defaults")
         return defaults
 
     text = p.read_text(encoding="utf-8")
@@ -595,7 +595,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
         except Exception as e:
             if strict:
                 raise ValueError(f"Invalid YAML in config {path}: {e}") from e
-            _vprint(verbose, f"[warn] invalid YAML in {path}: {e} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â using defaults")
+            _vprint(verbose, f"[warn] invalid YAML in {path}: {e} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â using defaults")
             return defaults
     else:
         try:
@@ -603,7 +603,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
         except Exception as e:
             if strict:
                 raise ValueError(f"Invalid JSON in config {path}: {e}") from e
-            _vprint(verbose, f"[warn] invalid JSON in {path}: {e} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â using defaults")
+            _vprint(verbose, f"[warn] invalid JSON in {path}: {e} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â using defaults")
             return defaults
 
     # normalize
@@ -719,7 +719,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--require-config", action="store_true",
         help="If set, missing/invalid --config is an error (default: soft fallback)."
     )
-    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")s {__version__}",
         help="Show version and exit",
     )
 
