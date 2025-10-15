@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches:
-      - "**"
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -14,31 +17,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      - name: Install dependencies
-        shell: bash
+      - name: Install (package + dev extras)
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
+          pip install ".[dev]"
+          pip install -e .
 
-      - name: Run tests (pytest) or fallback to verify script
-        shell: bash
+      # ---- CLI smoke test: render a real digest from examples/logs ----
+      - name: CLI smoke (render examples/logs)
         run: |
-          set -euo pipefail
-          if ls tests/*.py >/dev/null 2>&1 || [ -f pytest.ini ] || [ -f pyproject.toml ]; then
-            echo "Running pytest…"
-            python -m pytest -q
-          elif [ -f verify_digest.py ]; then
-            echo "pytest config not found, running verify_digest.py…"
-            python verify_digest.py
-          else
-            echo "No tests or verify script found. (Expected: tests/** or verify_digest.py)"
-            exit 0
-          fi
+          team-digest --format md --input ./examples/logs -o smoke.md
+          test -s smoke.md
+          grep -q "^# Team Digest" smoke.md
+          sed -n '1,80p' smoke.md
+
+      - name: Run tests
+        env:
+          TEAM_DIGEST_VERSION: ${{ github.sha }}
+        run: pytest -q

@@ -1,41 +1,31 @@
-# Python
+# Byte-compiled / cache
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 *.pyd
-*.egg-info/
+
+# Build / dist
 build/
 dist/
+*.egg-info/
 
-# Environments
+# Virtual envs
+.venv*/
 .venv/
 venv/
-.venv*/
-.env
-.env.*
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Tools & caches
+# Test caches
 .pytest_cache/
-.ruff_cache/
 .mypy_cache/
+.ruff_cache/
 
-# OS / editor
-.DS_Store
-Thumbs.db
-
-# Project outputs (keep a placeholder under logs/)
-outputs/
+# Local outputs and logs
 logs/
-!logs/.gitkeep
+outputs/
+*.log
 
-# Site builds (MkDocs / Pages)
-site/
-
-# Zips / scratch
-*.zip
-out.json
+# Keep example logs in the repo (override previous ignore rules)
+!examples/
+!examples/logs/
+!examples/logs/**
