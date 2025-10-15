@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "team-digest"
-version = "1.0.1"  # static version to avoid import-at-build
+version = "1.0.2"  # static version to avoid import-at-build
 description = "Generate team digests from logs/emails, post to Slack, and automate on Windows."
 readme = "README.md"
 requires-python = ">=3.9"  # widen if you can; keep >=3.11 if you must
