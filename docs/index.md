@@ -1,31 +1,14 @@
-# Team Digest Documentation
+# Team Digest
 
-**Team Digest** helps you turn scattered updates into clean daily, weekly, or monthly digests.  
-Generate digests from logs or emails, post them to Slack, or schedule them with GitHub Actions / Windows Task Scheduler.
+Automate team updates into clean **Markdown** or **JSON** digests. Point it at your notes/logs, and (optionally) send the result to **Slack** on a daily, weekly, or monthly schedule.
 
----
-
-## 📖 Table of Contents
-
-- [Configuration](CONFIGURATION.md)  
-  How to set up input sources (logs, email), customize sections, and define output formats.
-
-- [Workflows](WORKFLOWS.md)  
-  Examples for scheduling digests with GitHub Actions or Windows Task Scheduler.
-
-- [Support](SUPPORT.md)  
-  Where to get help, troubleshooting tips, and contact information.
-
-- [Security](SECURITY.md)  
-  Security guidelines, how to report vulnerabilities, and supported versions.
-
-- [Contributing](CONTRIBUTING.md)  
-  How to contribute code, report bugs, and suggest new features.
+> Install in seconds. Works on Windows, macOS, and Linux.
 
 ---
 
-## 🚀 Quickstart
+## Quick Start
 
-```bash
-pip install team-digest
-team-digest --example
+### Windows (PowerShell)
+```powershell
+# Write first digest to outputs\first.md using the included example logs
+if (-not (Test-Path outputs)) { New-Item -ItemType Directory outputs | Out-Null }; team-digest --input .\examples\logs --format md > .\outputs\first.md
