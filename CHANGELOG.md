@@ -77,3 +77,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.5] - 2025-10-14
 - Fix: correct CLI --version output and remove malformed parser line
+
+## [1.0.7] - 2025-10-14
+- CLI: correct --version and stabilize parser; add run() hook
