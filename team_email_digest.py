@@ -4,8 +4,8 @@
 # - Stable argparse configuration
 # - Calls the real generator in team_digest_runtime.generate_digest
 
-from __future__ import annotations
 
+import os
 import argparse
 import sys
 from pathlib import Path
