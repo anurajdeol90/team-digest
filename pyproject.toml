@@ -32,9 +32,10 @@ team-digest = "team_email_digest:main"
 include-package-data = true
 # Keep these top-level modules available so the CLI target can import them:
 py-modules = ["team_email_digest","team_digest_runtime","slack_delivery","team_digest_version"]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["team_digest*"]
 
 [tool.setuptools.package-data]
