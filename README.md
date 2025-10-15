@@ -1,24 +1,29 @@
 ﻿# Team Digest
 
-[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/team-digest.svg)](https://pypi.org/project/team-digest/)
+[![CI](https://github.com/anurajdeol90/team-digest/actions/workflows/ci.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions)
 [![Daily Digest](https://github.com/anurajdeol90/team-digest/actions/workflows/daily-digest.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/daily-digest.yml)
 [![Weekly Digest](https://github.com/anurajdeol90/team-digest/actions/workflows/weekly-digest.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/weekly-digest.yml)
 [![Monthly Digest](https://github.com/anurajdeol90/team-digest/actions/workflows/monthly-digest.yml/badge.svg)](https://github.com/anurajdeol90/team-digest/actions/workflows/monthly-digest.yml)
+[![Docs](https://img.shields.io/badge/docs-MkDocs-blue.svg)](https://anurajdeol90.github.io/team-digest/)
 
 Automated team meeting digests: summarize updates, decisions, risks, and actions into Markdown or JSON, with optional Slack/email notifications.
 
-## ðŸ“š Docs
+---
 
-- **Configuration** â€“ [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
-- **Workflows & schedules** â€“ [docs/WORKFLOWS.md](docs/WORKFLOWS.md)  
-- **Contributing** â€“ [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)  
-- **Support** â€“ [docs/SUPPORT.md](docs/SUPPORT.md)  
-- **Security policy** â€“ [docs/SECURITY.md](docs/SECURITY.md)  
-- **Code of Conduct** â€“ [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+## 📚 Docs
+
+- **Configuration** – [docs/CONFIGURATION.md](docs/CONFIGURATION.md)  
+- **Workflows & schedules** – [docs/WORKFLOWS.md](docs/WORKFLOWS.md)  
+- **Contributing** – [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)  
+- **Support** – [docs/SUPPORT.md](docs/SUPPORT.md)  
+- **Security policy** – [docs/SECURITY.md](docs/SECURITY.md)  
+- **Code of Conduct** – [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ---
 
-## âœ¨ Features
+## ✨ Features
+
 - Parse logs or model outputs into structured summaries
 - Export to **Markdown** or **JSON**
 - Optional **Slack** & **Email (SMTP)** notifications
@@ -28,110 +33,9 @@ Automated team meeting digests: summarize updates, decisions, risks, and actions
 
 ---
 
-## ðŸš€ Quick Start
+## 🚀 Quick Start
 
 ### 1) Clone the repository
 ```bash
 git clone https://github.com/anurajdeol90/team-digest.git
 cd team-digest
-```
-
-### 2) Install the CLI
-```bash
-pip install -U team-digest
-```
-
-### 3) Run locally (Markdown)
-```bash
-# Read from ./logs and write to outputs/
-mkdir -p outputs
-team-digest --input logs --format md > outputs/local_test.md
-```
-
-### 4) (Optional) Use a config file
-```bash
-team-digest --input logs --format md --config config.json > outputs/local_test.md
-```
-
----
-
-## ðŸ§­ Workflows (what gets created)
-
-- **Daily** (weekdays 9am Central) â†’ `outputs/daily_YYYY-MM-DD.md` *(yesterday)*
-- **Weekly** (Mondays 9am Central) â†’ `outputs/weekly_YYYY-WW.md` *(previous week)*
-- **Monthly** (1st @ 9am Central) â†’ `outputs/monthly_YYYY-MM.md` *(previous month)*
-
-Run on demand: **Actions â†’ [workflow] â†’ Run workflow** (branch: `main`).
-
----
-
-## ðŸ”§ Repository Configuration  
-**Settings â†’ Secrets and variables â†’ Actions**
-
-**Repository variables (optional)**
-- `DIGEST_INPUT_DIR` (default: `logs`)
-- `DIGEST_TEAM` (if your setup uses team routing)
-
-**Repository secrets (optional)**
-- **Slack**: `SLACK_WEBHOOK_URL`  
-- **Email (SMTP)**: `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `DIGEST_EMAIL_FROM`, `DIGEST_EMAIL_TO`
-
----
-
-## âœ… Repo Settings
-- **Settings â†’ Actions â†’ General â†’ Workflow permissions** â†’ **Read and write permissions**
-
----
-
-## ðŸ§ª Verify
-1. Add at least one file under `logs/` (or your `DIGEST_INPUT_DIR`).  
-2. Run **Daily**, **Weekly**, and **Monthly** manually on `main`.  
-3. Confirm new files appear under `outputs/` and (if configured) Slack/email arrive.
-
----
-
-# team-digest
-
-[![Publish Digests to GitHub Pages](https://github.com/anurajdeol90/team-digest/actions/workflows/publish-digests.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/publish-digests.yml)
-[![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml)
-
-Live site: https://<OWNER>.github.io/<REPO>/
-
----
-
-
----
-
-# 6) README â€” quick â€œchange timezoneâ€ section
-
-Add/replace **`README.md`** (or append this section if you already have one):
-
-```markdown
-## Time zone configuration (UTC by default)
-
-This project generates digests in **UTC by default**.
-
-### Change it globally
-- Set a repository variable: **Settings â†’ Variables â†’ Actions â†’ New variable**  
-  - Name: `DIGEST_TZ`  
-  - Value: any valid IANA time zone, e.g., `America/New_York`, `Europe/London`, `Asia/Kolkata`.
-
-All scheduled runs (daily/weekly/monthly) and manual runs (unless you override) will use this.
-
-### Change it per manual run
-When you click **Run workflow** for **Publish Digests**, fill the `tz` input with your desired IANA time zone.
-
-> GitHub **cron** always uses **UTC** for scheduling. If you need a specific *local* hour for the job to start, convert that hour to UTC and set the cron in the scheduler workflow.
-
-
-
-
-
-
-# Documentation
-
-- [Configuration](docs/CONFIGURATION.md)
-- [Workflows](docs/WORKFLOWS.md)
-- [Support](docs/SUPPORT.md)
-- [Security](docs/SECURITY.md)
-- [Contributing](docs/CONTRIBUTING.md)
