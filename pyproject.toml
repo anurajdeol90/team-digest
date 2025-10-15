@@ -33,8 +33,6 @@ team-digest = "team_email_digest:main"
 
 [tool.setuptools]
 # single-module distribution; no package discovery needed
-py-modules = ["team_email_digest"]  # keep team_digest_version if you still ship it, but don't use it for version
-
-[tool.setuptools.package-data]
-# add data files here if/when you embed templates or schemas
-# team_digest = ["templates/*", "schemas/*.json"]
+py-modules = ["team_email_digest", "team_digest_runtime"]
+[project.optional-dependencies]
+dev = ["pytest"]
