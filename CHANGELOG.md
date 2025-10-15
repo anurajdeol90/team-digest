@@ -92,3 +92,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.1.0] - 2025-10-14
 - Slack delivery (--post slack, --slack-webhook) and scheduled workflow
+
+## [1.1.1] - 2025-10-14
+- Publish Slack delivery features
