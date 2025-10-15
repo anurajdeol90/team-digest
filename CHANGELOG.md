@@ -71,3 +71,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.3] - 2025-10-14
 - Fix: CLI --version now reports the installed package version
+
+## [1.0.4] - 2025-10-14
+- Fix: corrected CLI --version argument formatting
