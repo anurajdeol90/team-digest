@@ -83,3 +83,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.8] - 2025-10-14
 - CLI now renders real digests from logs; supports YAML/JSON config; md/json outputs
+
+## [1.0.9] - 2025-10-14
+- CLI: resilient __version__ in source/CI contexts; CI installs package before tests
