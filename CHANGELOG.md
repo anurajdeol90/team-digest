@@ -95,3 +95,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.1.1] - 2025-10-14
 - Publish Slack delivery features
+
+## [1.1.1] - 2025-10-14
+- PyPI metadata polish (requires-python, classifiers, URLs)
