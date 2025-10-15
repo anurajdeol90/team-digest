@@ -89,3 +89,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.10] - 2025-10-14
 - Fix: UTF-8 decode error in runtime; normalize punctuation
+
+## [1.1.0] - 2025-10-14
+- Slack delivery (--post slack, --slack-webhook) and scheduled workflow
