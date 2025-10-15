@@ -50,12 +50,12 @@ SECTION_ALIASES: Dict[str, List[str]] = {
 # Header like "Summary", "## Summary", "Summary:", or "Summary: inline text"
 HEADER_RE = re.compile(r"^\s*(?:#+\s*)?([A-Za-z][A-Za-z\s_-]+?)\s*:?\s*(.*)$")
 
-# Bullet formats: -, *, â€¢, "1. ", "(1) ", checkbox "[ ]", "[x]"
-BULLET_RE = re.compile(r"^\s*(?:[-*â€¢]\s+|\d+\.\s+|\(\d+\)\s+|\[\s*\]\s+|\[\s*x\s*\]\s+)")
+# Bullet formats: -, *, Ã¢â‚¬Â¢, "1. ", "(1) ", checkbox "[ ]", "[x]"
+BULLET_RE = re.compile(r"^\s*(?:[-*Ã¢â‚¬Â¢]\s+|\d+\.\s+|\(\d+\)\s+|\[\s*\]\s+|\[\s*x\s*\]\s+)")
 
 # Loose "KV" action parser: "Title | owner: X | due: 2025-10-08 | priority: high"
 ACTION_KV_RE = re.compile(
-    r"(?i)^\s*(?P<title>[^|;:\u2014]+?)\s*(?:[|;:â€”-]{1,2}\s*)?"
+    r"(?i)^\s*(?P<title>[^|;:\u2014]+?)\s*(?:[|;:Ã¢â‚¬â€-]{1,2}\s*)?"
     r"(?:owner\s*[:\-]\s*(?P<owner>[^|;]+))?\s*(?:[|;]\s*)?"
     r"(?:due\s*[:\-]\s*(?P<due>\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}))?\s*(?:[|;]\s*)?"
     r"(?:priority\s*[:\-]\s*(?P<priority>p?\d|low|medium|high))?\s*$"
@@ -221,7 +221,7 @@ def parse_sections(text: str) -> Dict[str, List[str]]:
             continue
 
         # Fast-path robust header detection
-        low = line.lower().lstrip("#*â€¢ ").strip()
+        low = line.lower().lstrip("#*Ã¢â‚¬Â¢ ").strip()
         for alias, key in [
             ("summary", "summary"),
             ("decisions", "decisions"),
@@ -299,7 +299,7 @@ def render_markdown(d: Dict[str, object]) -> str:
     out.append(hdr("Summary"))
     summary: List[str] = d.get("summary", []) or []
     if len(summary) <= 1:
-        out.append((summary[0] if summary else "â€”") + "\n")
+        out.append((summary[0] if summary else "Ã¢â‚¬â€") + "\n")
     else:
         out.append(bullets(summary))
 
@@ -311,12 +311,12 @@ def render_markdown(d: Dict[str, object]) -> str:
     ]:
         out.append(hdr(title))
         items: List[str] = d.get(key, []) or []
-        out.append(bullets(items) if items else "â€”\n")
+        out.append(bullets(items) if items else "Ã¢â‚¬â€\n")
 
     out.append(hdr("Actions"))
     actions = d.get("actions", []) or []
     if not actions:
-        out.append("â€”\n")
+        out.append("Ã¢â‚¬â€\n")
     else:
         out.append("| Title | Owner | Due | Priority |\n|---|---|---|---|\n")
         for a in actions:
@@ -577,7 +577,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
     if not p.exists():
         if strict:
             raise FileNotFoundError(f"Config file not found: {path}")
-        _vprint(verbose, f"[warn] config not found: {path} â€” using defaults")
+        _vprint(verbose, f"[warn] config not found: {path} Ã¢â‚¬â€ using defaults")
         return defaults
 
     text = p.read_text(encoding="utf-8")
@@ -593,7 +593,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
         except Exception as e:
             if strict:
                 raise ValueError(f"Invalid YAML in config {path}: {e}") from e
-            _vprint(verbose, f"[warn] invalid YAML in {path}: {e} â€” using defaults")
+            _vprint(verbose, f"[warn] invalid YAML in {path}: {e} Ã¢â‚¬â€ using defaults")
             return defaults
     else:
         try:
@@ -601,7 +601,7 @@ def _load_config(path: str, *, strict: bool, verbose: bool) -> dict:
         except Exception as e:
             if strict:
                 raise ValueError(f"Invalid JSON in config {path}: {e}") from e
-            _vprint(verbose, f"[warn] invalid JSON in {path}: {e} â€” using defaults")
+            _vprint(verbose, f"[warn] invalid JSON in {path}: {e} Ã¢â‚¬â€ using defaults")
             return defaults
 
     # normalize
@@ -717,10 +717,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--require-config", action="store_true",
         help="If set, missing/invalid --config is an error (default: soft fallback)."
     )
-    parser.add_argument(
-        "-V", "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
+    parser.add_argument('-V','--version', action='version', version=f""%\(prog\)s {__version__}"")s {__version__}",
         help="Show version and exit",
     )
 
