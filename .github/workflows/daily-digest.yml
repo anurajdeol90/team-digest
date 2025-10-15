@@ -1,17 +1,27 @@
 name: Daily Digest (schedule)
 
 on:
-  # GitHub cron is always evaluated in UTC. Adjust the minutes/hour as needed.
   schedule:
-    - cron: "0 14 * * 1-5"  # 14:00 UTC Mon-Fri (example)
-  workflow_dispatch:
+    - cron: "0 9 * * 1-5"  # 09:00 UTC Mon-Fri
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
-  run:
-    uses: ./.github/workflows/publish-digests.yml
-    with:
-      digest: daily
-      date: ""              # auto
-      dry_run: false
-      tz: ${{ vars.DIGEST_TZ || 'UTC' }}
-    secrets: inherit
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install tool
+        run: |
+          python -m pip install --upgrade pip
+          pip install team-digest
+      - name: Run digest and post to Slack
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          team-digest --format md --input ./logs --from $(date -u -d "yesterday" +%F) --to $(date -u +%F) --post slack
