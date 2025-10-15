@@ -1,12 +1,12 @@
 # team_email_digest.py
 # CLI for Team Digest
 # - Correct --version using importlib.metadata
-# - Stable, explicit argparse configuration
+# - Stable argparse configuration
+# - Calls the real generator in team_digest_runtime.generate_digest
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from datetime import date, datetime
@@ -20,6 +20,9 @@ except ImportError:  # pragma: no cover (py<3.8)
 
 __version__ = _pkg_version("team-digest")
 
+# Import the generator
+from team_digest_runtime import generate_digest
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -28,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Keep this legacy positional to preserve your current interface
+    # Legacy positional retained to avoid breaking existing users
     parser.add_argument(
         "path",
         nargs="?",
@@ -71,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Input dir or file (default: '-' for stdin).",
     )
 
-    # Correct version flag (no string/indent errors)
+    # Correct version flag
     parser.add_argument(
         "-V",
         "--version",
@@ -100,53 +103,23 @@ def run(
     legacy_path: Optional[str],
 ) -> int:
     """
-    PLACE YOUR EXISTING GENERATION LOGIC HERE.
-
-    This stub preserves the CLI interface so your users arenâ€™t broken.
-    If your real implementation lives in another module, import and call it here, e.g.:
-
-        from team_digest.runtime import generate_digest
-        content = generate_digest(fmt=fmt, config=config, since=_parse_date(since), ...)
-
-    For now, we emit a minimal placeholder so the CLI works end-to-end.
+    Bridge from CLI to generator.
     """
-    # ---- BEGIN minimal placeholder (safe, replace with your real logic) ----
-    payload = {
-        "ok": True,
-        "format": fmt,
-        "config": config,
-        "since": since,
-        "until": until,
-        "input": input_dir or "-",
-        "path": legacy_path,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "version": __version__,
-        "message": "team-digest CLI is wired. Replace run() with your real generator.",
-    }
+    content = generate_digest(
+        fmt=fmt,
+        config_path=config,
+        since=_parse_date(since),
+        until=_parse_date(until),
+        input_dir=input_dir,
+    )
 
-    if fmt == "json":
-        rendered = json.dumps(payload, indent=2)
-    else:
-        # tiny MD summary; replace with your Jinja template output
-        lines = [
-            f"# Team Digest ({datetime.utcnow().date().isoformat()})",
-            "",
-            f"- config: {config or 'none'}",
-            f"- since: {since or 'n/a'}",
-            f"- until: {until or 'n/a'}",
-            f"- input: {input_dir or '-'}",
-            f"- version: {__version__}",
-            "",
-            "_Replace this stub with your real digest rendering._",
-        ]
-        rendered = "\n".join(lines)
-    # ---- END minimal placeholder ----
-
+    # Write or print
     if output:
-        Path(output).parent.mkdir(parents=True, exist_ok=True)
-        Path(output).write_text(rendered, encoding="utf-8")
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(content, encoding="utf-8")
     else:
-        sys.stdout.write(rendered + ("\n" if not rendered.endswith("\n") else ""))
+        sys.stdout.write(content if content.endswith("\n") else content + "\n")
 
     return 0
 
