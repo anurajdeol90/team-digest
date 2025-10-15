@@ -80,3 +80,6 @@ and this project adheres to \[Semantic Versioning](https://semver.org/).
 
 ## [1.0.7] - 2025-10-14
 - CLI: correct --version and stabilize parser; add run() hook
+
+## [1.0.8] - 2025-10-14
+- CLI now renders real digests from logs; supports YAML/JSON config; md/json outputs
