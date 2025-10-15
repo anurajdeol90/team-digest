@@ -32,9 +32,6 @@ else:
 
 # Import generator and optional Slack delivery
 from team_digest_runtime import generate_digest
-from slack_delivery import post_markdown
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="team-digest",
@@ -100,7 +97,7 @@ def run(
         webhook = slack_webhook or os.environ.get("SLACK_WEBHOOK")
         if not webhook:
             raise SystemExit("Slack posting requested but no webhook provided. Use --slack-webhook or SLACK_WEBHOOK env.")
-        post_markdown(webhook, content)
+        (__import__("slack_delivery").slack_delivery.post_markdown)(webhook, content)
 
     return 0
 
