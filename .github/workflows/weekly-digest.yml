@@ -1,13 +1,20 @@
 name: Weekly Digest (schedule)
 on:
   schedule:
-    - cron: "0 14 * * 1"     # 9am America/Chicago Mondays (UTC 14:00)
+    - cron: "0 14 * * 1"     # 14:00 UTC on Mondays
   workflow_dispatch: {}
+
+concurrency:
+  group: digest-${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
+      DIGEST_CONFIG: ${{ vars.DIGEST_CONFIG }}
       WEBHOOK_1: ${{ secrets.SLACK_WEBHOOK }}
       WEBHOOK_2: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
@@ -24,18 +31,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir "git+https://github.com/anurajdeol90/team-digest@main#egg=team-digest"
 
-      - name: Resolve INPUT_DIR (packaged examples)
+      - name: Resolve source (config or input dir; fallback to packaged examples)
         run: |
-          INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
-          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
-          echo "Resolved INPUT_DIR=$INPUT_DIR"
+          set -e
+          if [ -n "$DIGEST_CONFIG" ]; then
+            echo "USE_CONFIG=$DIGEST_CONFIG" >> "$GITHUB_ENV"
+            echo "Source: CONFIG=$DIGEST_CONFIG"
+          elif [ -n "$DIGEST_INPUT_DIR" ]; then
+            echo "INPUT_DIR=$DIGEST_INPUT_DIR" >> "$GITHUB_ENV"
+            echo "Source: INPUT_DIR=$DIGEST_INPUT_DIR"
+          else
+            INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
+            echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
+            echo "Source: INPUT_DIR (examples) -> $INPUT_DIR"
+          fi
 
-      - name: Build digest (file)
+      - name: Build digest (last 7 days → today)
         run: |
           set -e
           mkdir -p outputs
+          FROM=$(date -d '7 days ago' +%F)
+          TO=$(date +%F)
           OUT=outputs/weekly.md
-          team-digest --input "$INPUT_DIR" --format md -o "$OUT"
+          echo "Window: $FROM → $TO (TZ=$TZ)"
+          if [ -n "$USE_CONFIG" ]; then
+            team-digest --config "$USE_CONFIG" --format md --from "$FROM" --to "$TO" -o "$OUT"
+          else
+            team-digest --input "$INPUT_DIR" --format md --from "$FROM" --to "$TO" -o "$OUT"
+          fi
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUT" || true
 
@@ -45,7 +68,7 @@ jobs:
           if [ -n "$WEBHOOK" ]; then
             echo "Posting to Slack via webhook…"
             curl -sS -X POST -H 'Content-type: application/json' \
-              --data "{\"text\": $(jq -Rs . < outputs/weekly.md)}" \
+              --data "{\"text\": $(jq -Rs '\"```\\n\" + . + \"\\n```\"' < outputs/weekly.md)}" \
               "$WEBHOOK"
           else
             echo "No Slack webhook provided; skipping Slack."
