@@ -12,14 +12,15 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      # Optional timezone (IANA name). If not set, we default to UTC.
+      # Optional timezone (IANA). Defaults to UTC if not set.
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
-      # Real data inputs:
+      # Real data inputs (set one of these in repo "Actions → Variables"):
       DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
       DIGEST_CONFIG: ${{ vars.DIGEST_CONFIG }}
-      # Slack (either one):
+      # Slack secrets (set one of these in repo "Actions → Secrets"):
       WEBHOOK_1: ${{ secrets.SLACK_WEBHOOK }}
       WEBHOOK_2: ${{ secrets.SLACK_WEBHOOK_URL }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # While we prep the fixed PyPI release, install from GitHub main
+      # While we prep a fixed PyPI release, install from GitHub main
       - name: Install team-digest (from GitHub main)
         run: |
           python -m pip install --upgrade pip
@@ -70,10 +71,16 @@ jobs:
         run: |
           WEBHOOK="${WEBHOOK_1:-$WEBHOOK_2}"
           if [ -n "$WEBHOOK" ]; then
-            echo "Posting to Slack via webhook…"
-            curl -sS -X POST -H 'Content-type: application/json' \
-              --data "{\"text\": $(jq -Rs '\"```\\n\" + . + \"\\n```\"' < outputs/daily.md)}" \
-              "$WEBHOOK"
+            OUT=outputs/daily.md
+            payload=$(python - "$OUT" <<'PY'
+import json, sys
+p = sys.argv[1]
+with open(p, encoding="utf-8") as f:
+    text = f.read()
+print(json.dumps({"text": f"```\n{text}\n```"}))
+PY
+)
+            curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$WEBHOOK"
           else
             echo "No Slack webhook provided; skipping Slack."
           fi

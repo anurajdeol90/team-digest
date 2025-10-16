@@ -17,6 +17,7 @@ jobs:
       DIGEST_CONFIG: ${{ vars.DIGEST_CONFIG }}
       WEBHOOK_1: ${{ secrets.SLACK_WEBHOOK }}
       WEBHOOK_2: ${{ secrets.SLACK_WEBHOOK_URL }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,10 +67,16 @@ jobs:
         run: |
           WEBHOOK="${WEBHOOK_1:-$WEBHOOK_2}"
           if [ -n "$WEBHOOK" ]; then
-            echo "Posting to Slack via webhook…"
-            curl -sS -X POST -H 'Content-type: application/json' \
-              --data "{\"text\": $(jq -Rs '\"```\\n\" + . + \"\\n```\"' < outputs/weekly.md)}" \
-              "$WEBHOOK"
+            OUT=outputs/weekly.md
+            payload=$(python - "$OUT" <<'PY'
+import json, sys
+p = sys.argv[1]
+with open(p, encoding="utf-8") as f:
+    text = f.read()
+print(json.dumps({"text": f"```\n{text}\n```"}))
+PY
+)
+            curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$WEBHOOK"
           else
             echo "No Slack webhook provided; skipping Slack."
           fi
