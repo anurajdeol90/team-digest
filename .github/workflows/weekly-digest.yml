@@ -30,7 +30,7 @@ jobs:
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
           echo "Resolved INPUT_DIR=$INPUT_DIR"
 
-      - name: Run digest → file and (optional) Slack
+      - name: Build digest (file)
         run: |
           set -e
           mkdir -p outputs
@@ -39,13 +39,16 @@ jobs:
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUT" || true
 
+      - name: Post to Slack (optional)
+        run: |
           WEBHOOK="${WEBHOOK_1:-$WEBHOOK_2}"
           if [ -n "$WEBHOOK" ]; then
-            echo "Posting to Slack…"
-            team-digest --input "$INPUT_DIR" --format md --post slack \
-              --slack-webhook "$WEBHOOK" -o /dev/null
+            echo "Posting to Slack via webhook…"
+            curl -sS -X POST -H 'Content-type: application/json' \
+              --data "{\"text\": $(jq -Rs . < outputs/weekly.md)}" \
+              "$WEBHOOK"
           else
-            echo "No Slack webhook provided; skipping Slack post."
+            echo "No Slack webhook provided; skipping Slack."
           fi
 
       - name: Upload artifact
