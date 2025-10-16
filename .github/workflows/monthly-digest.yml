@@ -2,7 +2,7 @@ name: Monthly Digest (schedule)
 
 on:
   schedule:
-    - cron: "0 8 1 * *"   # 1st of month 08:00 local time
+    - cron: "0 8 1 * *"      # 1st of each month at 08:00 local time
   workflow_dispatch: {}
 
 jobs:
@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: ${{ vars.TZ || 'UTC' }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,19 +30,17 @@ jobs:
           INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate monthly digest
+      - name: Generate & post monthly digest
         run: |
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/monthly.md
           echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/monthly.md || true
-
-      - name: Post to Slack (if webhook is set)
-        if: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
-        run: |
-          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
-          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            PAYLOAD=$(jq -Rs '{text: ("```" + . + "```")}' < outputs/monthly.md)
+            curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+          else
+            echo "SLACK_WEBHOOK not set—skipping Slack post."
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

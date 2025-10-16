@@ -2,7 +2,7 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # 08:00 local time (see TZ variable)
+    - cron: "0 8 * * 1-5"    # 08:00 local time (controlled by TZ)
   workflow_dispatch: {}
 
 jobs:
@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: ${{ vars.TZ || 'UTC' }}
+      # Prefer SLACK_WEBHOOK_URL, fall back to SLACK_WEBHOOK
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,11 +38,12 @@ jobs:
           echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
-        if: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+        if: ${{ env.SLACK_WEBHOOK != '' }}
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
         run: |
-          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
+          # Post the Markdown as a fenced block to Slack
+          PAYLOAD=$(jq -Rs '{text: ("```" + . + "```")}' < outputs/daily.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Upload artifact
