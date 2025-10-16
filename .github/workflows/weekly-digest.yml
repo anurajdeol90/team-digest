@@ -2,14 +2,7 @@ name: Weekly Digest (schedule)
 on:
   schedule:
     - cron: "0 14 * * 1"     # 9am America/Chicago Mondays (UTC 14:00)
-  workflow_dispatch:
-    inputs:
-      use_examples:
-        description: "Use packaged example logs instead of repo logs/"
-        required: false
-        default: "true"
-        type: choice
-        options: ["true", "false"]
+  workflow_dispatch: {}
 
 jobs:
   run:
@@ -28,23 +21,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR (examples or repo logs)
-        env:
-          USE_EXAMPLES: ${{ inputs.use_examples }}
+      - name: Resolve INPUT_DIR (packaged examples)
         run: |
-          set -eu
-          if [ "${USE_EXAMPLES:-true}" = "true" ]; then
-            python - <<'PY'
+          python - <<'PY'
 import os, pathlib, team_digest
 p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'
+print("INPUT_DIR="+str(p))
 with open(os.environ["GITHUB_ENV"], "a") as f:
-    f.write(f"INPUT_DIR={p}\n")
-print(f"Resolved packaged examples to: {p}")
+    f.write("INPUT_DIR="+str(p)+"\n")
 PY
-          else
-            echo "INPUT_DIR=logs" >> "$GITHUB_ENV"
-            echo "Using repo logs/ directory"
-          fi
 
       - name: Weekly digest → Slack
         env:
@@ -52,6 +37,7 @@ PY
         run: |
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md --post slack -o outputs/weekly.md
+          echo "---- Preview (first 60 lines) ----"
           head -n 60 outputs/weekly.md || true
 
       - name: Upload artifact
