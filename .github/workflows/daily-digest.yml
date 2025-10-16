@@ -29,19 +29,19 @@ jobs:
           INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate & post daily digest
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+      - name: Generate daily digest
         run: |
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
           echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/daily.md || true
-          if [ -n "$SLACK_WEBHOOK" ]; then
-            PAYLOAD=$(jq -cn --arg t "$(cat outputs/daily.md)" '{text: "```" + $t + "```"}')
-            curl -fsSL -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
-          else
-            echo "SLACK_WEBHOOK not set—skipping Slack post."
-          fi
+
+      - name: Post to Slack (if webhook is set)
+        if: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+        run: |
+          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
