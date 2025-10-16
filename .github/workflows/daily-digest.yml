@@ -2,7 +2,8 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # 08:00 local time (see TZ below)
+    # 08:00 local time (set TZ variable in repo settings)
+    - cron: "0 8 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
@@ -22,47 +23,39 @@ jobs:
       - name: Install team-digest
         run: |
           python -m pip install --upgrade pip
-          pip install "team-digest>=1.1.6,<2" jq
+          pip install "team-digest>=1.1.6,<2"
 
+      # Default to packaged examples
       - name: Resolve INPUT_DIR from packaged examples
         run: |
           INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute daily date range (today..today in $TZ)
+      # Prefer repo INPUT_DIR override, supporting repo-relative or absolute
+      - name: Prefer repo INPUT_DIR override (if set)
+        if: ${{ vars.INPUT_DIR && vars.INPUT_DIR != '' }}
         run: |
-          python - <<'PY' >> "$GITHUB_ENV"
-          import os, datetime
-          try:
-              from zoneinfo import ZoneInfo
-          except Exception:
-              ZoneInfo = None
-          tz = os.environ.get("TZ","UTC")
-          today = datetime.datetime.now(ZoneInfo(tz) if ZoneInfo else None).date()
-          print(f"RANGE_FROM={today.isoformat()}")
-          print(f"RANGE_TO={today.isoformat()}")
-          PY
+          VAL="${{ vars.INPUT_DIR }}"
+          case "$VAL" in
+            /*)    echo "INPUT_DIR=$VAL" >> "$GITHUB_ENV" ;;
+            *)     echo "INPUT_DIR=${GITHUB_WORKSPACE}/$VAL" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: Generate daily digest
         run: |
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --format md \
-            --from "$RANGE_FROM" --to "$RANGE_TO" \
-            -o outputs/daily.md
-          echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/daily.md || true
+          team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
+          echo '---- Preview (first 60 lines) ----'
+          head -n 60 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
+        if: ${{ secrets.SLACK_WEBHOOK }}
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          WEBHOOK="${SLACK_WEBHOOK:-${SLACK_WEBHOOK_URL:-}}"
-          if [ -n "$WEBHOOK" ]; then
-            jq -Rs '{text: ("```" + . + "```")}' < outputs/daily.md \
-              | curl -fsSL -H 'Content-Type: application/json' --data-binary @- "$WEBHOOK"
-          else
-            echo "No Slack webhook secret set; skipping Slack post."
-          fi
+          # Post markdown as a code block to preserve formatting
+          jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md \
+          | curl -fsSL -H 'Content-Type: application/json' --data-binary @- "$SLACK_WEBHOOK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

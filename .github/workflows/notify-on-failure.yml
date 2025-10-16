@@ -1,0 +1,26 @@
+name: Notify on Digest Failures
+
+on:
+  workflow_run:
+    workflows:
+      - Daily Digest
+      - Weekly Digest (schedule)
+      - Monthly Digest (schedule)
+    types: [completed]
+
+jobs:
+  notify:
+    if: ${{ github.event.workflow_run.conclusion != 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post failure to Slack
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          WF: ${{ github.event.workflow.name }}
+          URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CONCL: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          MSG="❌ $WF failed on branch $BRANCH ($CONCL)\n$URL"
+          jq -n --arg t "$MSG" '{text: $t}' \
+          | curl -fsSL -H 'Content-Type: application/json' --data-binary @- "$SLACK_WEBHOOK"
