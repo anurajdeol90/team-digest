@@ -1,16 +1,53 @@
 name: Monthly Digest (schedule)
-
 on:
   schedule:
-    - cron: "0 16 1 * *"   # 16:00 UTC on the 1st of the month (example)
+    - cron: "0 14 1 * *"   # 9am America/Chicago on the 1st (UTC 14:00)
   workflow_dispatch:
+    inputs:
+      use_examples:
+        description: "Use packaged example logs instead of repo logs/"
+        type: boolean
+        default: true
 
 jobs:
   run:
-    uses: ./.github/workflows/publish-digests.yml
-    with:
-      digest: monthly
-      date: ""              # auto
-      dry_run: false
-      tz: ${{ vars.DIGEST_TZ || 'UTC' }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install team-digest
+        run: |
+          python -m pip install --upgrade pip
+          pip install "team-digest>=1.1.6,<2"
+
+      - name: Resolve INPUT_DIR (examples or repo logs)
+        env: { USE_EXAMPLES: ${{ inputs.use_examples }} }
+        run: |
+          if [ "${USE_EXAMPLES}" = "true" ]; then
+            python - <<'PY'
+import os, pathlib, team_digest
+p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'
+print("INPUT_DIR="+str(p))
+with open(os.environ["GITHUB_ENV"], "a") as f:
+    f.write("INPUT_DIR="+str(p)+"\n")
+PY
+          else
+            echo "INPUT_DIR=logs" >> "$GITHUB_ENV"
+          fi
+          echo "INPUT_DIR is $INPUT_DIR"
+
+      - name: Monthly digest → Slack
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          mkdir -p outputs
+          team-digest --input "$INPUT_DIR" --format md --post slack -o outputs/monthly.md
+          head -n 60 outputs/monthly.md || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monthly-digest
+          path: outputs/**
