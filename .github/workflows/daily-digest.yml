@@ -1,52 +1,56 @@
 name: Daily Digest
-
 on:
   schedule:
-    - cron: "0 14 * * *"  # 2pm UTC daily
+    - cron: "0 13 * * 1-5"   # 8am America/Chicago weekdays (UTC 13:00)
   workflow_dispatch:
+    inputs:
+      use_examples:
+        description: "Use packaged example logs instead of repo logs/"
+        type: boolean
+        default: true
 
 jobs:
-  digest:
+  run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Team Digest
-        run: pip install --upgrade pip team-digest
-
-      - name: Resolve packaged examples (demo; replace with your logs dir)
-        id: logs
+      - name: Install team-digest
         run: |
-          set -euo pipefail
-          python - <<'PY' | tee logs_path.txt
-          import importlib.resources as r, team_digest, sys
-          root = r.files(team_digest) / "examples" / "logs"
-          print("Resolved:", root)
-          try:
-            entries = [p.name for p in root.iterdir()]
-          except Exception as e:
-            print("ERROR listing examples:", e); sys.exit(1)
-          print("Contents:", entries)
-          print(root.__fspath__())
-          PY
+          python -m pip install --upgrade pip
+          pip install "team-digest>=1.1.6,<2"
 
-      - name: Render outputs
+      - name: Resolve INPUT_DIR (examples or repo logs)
+        id: inputdir
+        env:
+          USE_EXAMPLES: ${{ inputs.use_examples }}
         run: |
-          set -euo pipefail
-          mkdir -p out
-          team-digest --input "$(tail -n 1 logs_path.txt)" --format md   --output out/digest.md
-          team-digest --input "$(tail -n 1 logs_path.txt)" --format json --output out/digest.json
-          test -s out/digest.md
-          test -s out/digest.json
+          if [ "${USE_EXAMPLES}" = "true" ]; then
+            python - <<'PY'
+import os, pathlib, team_digest
+p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'
+print("INPUT_DIR="+str(p))
+with open(os.environ["GITHUB_ENV"], "a") as f:
+    f.write("INPUT_DIR="+str(p)+"\n")
+PY
+          else
+            echo "INPUT_DIR=logs" >> "$GITHUB_ENV"
+          fi
+          echo "INPUT_DIR is $INPUT_DIR"
 
-      # - name: Post to Slack (optional)
-      #   env:
-      #     TEAM_DIGEST_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      #   run: team-digest --input "$(tail -n 1 logs_path.txt)" --format md --post slack
+      - name: Run digest (Markdown) and post to Slack
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          mkdir -p outputs
+          team-digest --input "$INPUT_DIR" --format md --post slack -o outputs/daily.md
+          echo "---- Preview (first 60 lines) ----"
+          head -n 60 outputs/daily.md || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daily-digest
+          path: outputs/**
