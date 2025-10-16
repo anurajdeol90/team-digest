@@ -23,13 +23,9 @@ jobs:
 
       - name: Resolve INPUT_DIR (packaged examples)
         run: |
-          python - <<'PY'
-import os, pathlib, team_digest
-p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'
-print("INPUT_DIR="+str(p))
-with open(os.environ["GITHUB_ENV"], "a") as f:
-    f.write("INPUT_DIR="+str(p)+"\n")
-PY
+          INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
+          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
+          echo "Resolved INPUT_DIR=$INPUT_DIR"
 
       - name: Weekly digest → Slack
         env:
