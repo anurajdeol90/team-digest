@@ -1,0 +1,7 @@
+site_name: Team Digest
+site_url: https://anurajdeol90.github.io/team-digest/
+repo_url: https://github.com/anurajdeol90/team-digest
+theme:
+  name: material
+nav:
+  - Home: index.md
