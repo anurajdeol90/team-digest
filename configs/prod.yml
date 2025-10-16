@@ -1,0 +1,17 @@
+﻿sources:
+  - type: files
+    include:
+      - "logs/**/*.md"
+      - "notes/**/*.md"
+    exclude:
+      - "**/archive/**"
+rules:
+  timezone: "${DIGEST_TZ:UTC}"
+output:
+  sections:
+    - summary
+    - decisions
+    - actions
+    - risks
+    - dependencies
+    - notes
