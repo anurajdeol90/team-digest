@@ -12,7 +12,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      TZ: ${{ vars.DIGEST_TZ }}
       DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
       DIGEST_CONFIG: ${{ vars.DIGEST_CONFIG }}
       WEBHOOK_1: ${{ secrets.SLACK_WEBHOOK }}
@@ -31,6 +31,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --no-cache-dir "git+https://github.com/anurajdeol90/team-digest@main#egg=team-digest"
+
+      - name: Normalize TZ default
+        run: |
+          echo "TZ=${TZ:-UTC}" >> "$GITHUB_ENV"
+          echo "Using TZ=${TZ:-UTC}"
 
       - name: Resolve source (config or input dir; fallback to packaged examples)
         run: |
