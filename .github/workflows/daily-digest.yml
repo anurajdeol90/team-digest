@@ -1,5 +1,5 @@
-
 name: Daily Digest
+
 on:
   schedule:
     - cron: "0 14 * * *"  # 2pm UTC daily
@@ -8,25 +8,45 @@ on:
 jobs:
   digest:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install --upgrade pip team-digest
+
+      - name: Install Team Digest
+        run: pip install --upgrade pip team-digest
+
       - name: Resolve packaged examples (demo; replace with your logs dir)
         id: logs
         run: |
+          set -euo pipefail
           python - <<'PY' | tee logs_path.txt
-          import importlib.resources as r, team_digest
-          print((r.files(team_digest) / "examples" / "logs").__fspath__())
+          import importlib.resources as r, team_digest, sys
+          root = r.files(team_digest) / "examples" / "logs"
+          print("Resolved:", root)
+          try:
+            entries = [p.name for p in root.iterdir()]
+          except Exception as e:
+            print("ERROR listing examples:", e); sys.exit(1)
+          print("Contents:", entries)
+          print(root.__fspath__())
           PY
+
       - name: Render outputs
         run: |
+          set -euo pipefail
           mkdir -p out
-          team-digest --input "$(cat logs_path.txt)" --format md   --output out/digest.md
-          team-digest --input "$(cat logs_path.txt)" --format json --output out/digest.json
+          team-digest --input "$(tail -n 1 logs_path.txt)" --format md   --output out/digest.md
+          team-digest --input "$(tail -n 1 logs_path.txt)" --format json --output out/digest.json
+          test -s out/digest.md
+          test -s out/digest.json
+
       # - name: Post to Slack (optional)
-      #   run: team-digest --input "$(cat logs_path.txt)" --format md --post slack
       #   env:
       #     TEAM_DIGEST_SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      #   run: team-digest --input "$(tail -n 1 logs_path.txt)" --format md --post slack
