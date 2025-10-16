@@ -58,3 +58,6 @@ include = ["team_digest*"]
 [tool.setuptools.package-data]
 team_digest = ["examples/**"]
 
+[project.urls]
+Homepage = "https://github.com/anurajdeol90/team-digest"
+Issues = "https://github.com/anurajdeol90/team-digest/issues"
