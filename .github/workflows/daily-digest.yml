@@ -6,15 +6,20 @@ on:
     inputs:
       use_examples:
         description: "Use packaged example logs instead of repo logs/"
-        type: boolean
-        default: true
+        required: false
+        default: "true"      # keep as string for widest YAML compatibility
+        type: choice
+        options: ["true", "false"]
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -24,24 +29,24 @@ jobs:
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (examples or repo logs)
-        id: inputdir
         env:
           USE_EXAMPLES: ${{ inputs.use_examples }}
         run: |
-          if [ "${USE_EXAMPLES}" = "true" ]; then
+          set -eu
+          if [ "${USE_EXAMPLES:-true}" = "true" ]; then
             python - <<'PY'
 import os, pathlib, team_digest
 p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'
-print("INPUT_DIR="+str(p))
 with open(os.environ["GITHUB_ENV"], "a") as f:
-    f.write("INPUT_DIR="+str(p)+"\n")
+    f.write(f"INPUT_DIR={p}\n")
+print(f"Resolved packaged examples to: {p}")
 PY
           else
             echo "INPUT_DIR=logs" >> "$GITHUB_ENV"
+            echo "Using repo logs/ directory"
           fi
-          echo "INPUT_DIR is $INPUT_DIR"
 
-      - name: Run digest (Markdown) and post to Slack
+      - name: Run digest → Slack
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
@@ -50,7 +55,8 @@ PY
           echo "---- Preview (first 60 lines) ----"
           head -n 60 outputs/daily.md || true
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: daily-digest
           path: outputs/**
