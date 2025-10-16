@@ -2,8 +2,7 @@ name: Weekly Digest (schedule)
 
 on:
   schedule:
-    # Every Monday 08:00 local time
-    - cron: "0 8 * * 1"
+    - cron: "0 8 * * 1"   # Monday 08:00 local time
   workflow_dispatch: {}
 
 jobs:
@@ -27,9 +26,8 @@ jobs:
 
       - name: Resolve INPUT_DIR from packaged examples
         run: |
-          python -c "import os, pathlib, team_digest; \
-p = pathlib.Path(team_digest.__file__).parent/'examples'/'logs'; \
-open(os.environ['GITHUB_ENV'],'a').write('INPUT_DIR='+str(p)+'\n')"
+          INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
+          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
       - name: Generate & post weekly digest
         env:
@@ -38,7 +36,6 @@ open(os.environ['GITHUB_ENV'],'a').write('INPUT_DIR='+str(p)+'\n')"
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/weekly.md
           echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/weekly.md || true
-
           if [ -n "$SLACK_WEBHOOK" ]; then
             PAYLOAD=$(jq -cn --arg t "$(cat outputs/weekly.md)" '{text: "```" + $t + "```"}')
             curl -fsSL -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
