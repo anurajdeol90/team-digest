@@ -33,15 +33,9 @@ jobs:
         run: |
           set -e
           CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
-          fi
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"
-          fi
-          if [ -z "$CANDIDATE" ]; then
-            CANDIDATE="logs"
-          fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"; fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"; fi
+          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
 
           if [ -d "$CANDIDATE" ]; then
             INPUT_DIR="$CANDIDATE"
@@ -52,11 +46,7 @@ jobs:
           fi
 
           if [ -z "$INPUT_DIR" ]; then
-            INPUT_DIR=$(python - <<'PY'
-import pathlib, team_digest
-print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')
-PY
-)
+            INPUT_DIR=$(python -c "import pathlib,team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
           fi
 
           echo "Resolved INPUT_DIR=$INPUT_DIR"
@@ -73,8 +63,7 @@ PY
 
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
-          echo '---- Preview (first 40 lines) ----'
-          head -n 40 outputs/weekly.md || true
+          echo '---- Preview (first 40 lines) ----'; head -n 40 outputs/weekly.md || true
 
           SLACK_WEBHOOK="${_A:-${_B:-}}"
           if [ -n "$SLACK_WEBHOOK" ]; then

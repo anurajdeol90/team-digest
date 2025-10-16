@@ -32,21 +32,11 @@ jobs:
       - name: Resolve INPUT_DIR (override → repo var → logs/ → examples)
         run: |
           set -e
-          # 1) manual override from dispatch input
           CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
-          # 2) repo variables, if not set by input
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
-          fi
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"
-          fi
-          # 3) default to "logs"
-          if [ -z "$CANDIDATE" ]; then
-            CANDIDATE="logs"
-          fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"; fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"; fi
+          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
 
-          # resolve candidate
           if [ -d "$CANDIDATE" ]; then
             INPUT_DIR="$CANDIDATE"
           elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
@@ -55,13 +45,8 @@ jobs:
             INPUT_DIR=""
           fi
 
-          # 4) fallback → packaged examples
           if [ -z "$INPUT_DIR" ]; then
-            INPUT_DIR=$(python - <<'PY'
-import pathlib, team_digest
-print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')
-PY
-)
+            INPUT_DIR=$(python -c "import pathlib,team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
           fi
 
           echo "Resolved INPUT_DIR=$INPUT_DIR"
@@ -72,8 +57,7 @@ PY
           set -e
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
-          echo '---- Preview (first 40 lines) ----'
-          head -n 40 outputs/daily.md || true
+          echo '---- Preview (first 40 lines) ----'; head -n 40 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
         env:
