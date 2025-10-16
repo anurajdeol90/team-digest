@@ -2,11 +2,10 @@ name: Monthly Digest (schedule)
 
 on:
   schedule:
-    # 1st day of month, 08:00 local time
-    - cron: "0 8 1 * *"
+    - cron: "0 8 1 * *"     # 1st of month 08:00 (see DIGEST_TZ)
   workflow_dispatch:
     inputs:
-      input_dir:
+      INPUT_DIR:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
         type: string
@@ -30,19 +29,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR and optional config
+      - name: Resolve INPUT_DIR (override → repo var → logs/ → examples)
         run: |
           set -e
-          CAND="${{ inputs.input_dir }}"
-          if [ -z "$CAND" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
-            CAND="${{ vars.DEFAULT_INPUT_DIR }}"
+          CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
+          fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
+            CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"
+          fi
+          if [ -z "$CANDIDATE" ]; then
+            CANDIDATE="logs"
           fi
 
-          if [ -n "$CAND" ] && [ -d "$GITHUB_WORKSPACE/$CAND" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CAND"
-          elif [ -n "$CAND" ] && [ -d "$CAND" ]; then
-            INPUT_DIR="$CAND"
+          if [ -d "$CANDIDATE" ]; then
+            INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
           else
+            INPUT_DIR=""
+          fi
+
+          if [ -z "$INPUT_DIR" ]; then
             INPUT_DIR=$(python - <<'PY'
 import pathlib, team_digest
 print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')
@@ -53,23 +62,21 @@ PY
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-          CFG="${{ vars.DIGEST_CONFIG }}"
-          if [ -n "$CFG" ]; then
-            if [ -f "$GITHUB_WORKSPACE/$CFG" ]; then CFG="$GITHUB_WORKSPACE/$CFG"; fi
-            if [ -f "$CFG" ]; then
-              echo "Using DIGEST_CONFIG=$CFG"
-              echo "DIGEST_CONFIG=$CFG" >> "$GITHUB_ENV"
-            fi
-          fi
-
       - name: Generate & post monthly digest
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+          _A: ${{ secrets.SLACK_WEBHOOK_URL }}
+          _B: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           set -e
+          FIRST=$(date -u +%Y-%m-01)
+          LAST=$(date -u -d "$FIRST +1 month -1 day" +%Y-%m-%d)
+
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --format md ${DIGEST_CONFIG:+--config "$DIGEST_CONFIG"} -o outputs/monthly.md
-          echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/monthly.md || true
+          team-digest --input "$INPUT_DIR" --from "$FIRST" --to "$LAST" --format md -o outputs/monthly.md
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/monthly.md || true
+
+          SLACK_WEBHOOK="${_A:-${_B:-}}"
           if [ -n "$SLACK_WEBHOOK" ]; then
             PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
             curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"

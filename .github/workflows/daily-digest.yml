@@ -2,10 +2,10 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # 08:00 local time (see DIGEST_TZ variable)
+    - cron: "0 8 * * 1-5"   # 08:00 local time (see DIGEST_TZ)
   workflow_dispatch:
     inputs:
-      input_dir:
+      INPUT_DIR:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
         type: string
@@ -29,22 +29,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR and optional config
+      - name: Resolve INPUT_DIR (override → repo var → logs/ → examples)
         run: |
           set -e
-          # 1) workflow override input
-          CAND="${{ inputs.input_dir }}"
-          # 2) repo default (variable), e.g. 'logs'
-          if [ -z "$CAND" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
-            CAND="${{ vars.DEFAULT_INPUT_DIR }}"
+          # 1) manual override from dispatch input
+          CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
+          # 2) repo variables, if not set by input
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
+          fi
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then
+            CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"
+          fi
+          # 3) default to "logs"
+          if [ -z "$CANDIDATE" ]; then
+            CANDIDATE="logs"
           fi
 
-          if [ -n "$CAND" ] && [ -d "$GITHUB_WORKSPACE/$CAND" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CAND"
-          elif [ -n "$CAND" ] && [ -d "$CAND" ]; then
-            INPUT_DIR="$CAND"
+          # resolve candidate
+          if [ -d "$CANDIDATE" ]; then
+            INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
           else
-            # 3) fallback → packaged examples in the installed wheel
+            INPUT_DIR=""
+          fi
+
+          # 4) fallback → packaged examples
+          if [ -z "$INPUT_DIR" ]; then
             INPUT_DIR=$(python - <<'PY'
 import pathlib, team_digest
 print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')
@@ -55,29 +67,21 @@ PY
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-          # Optional config from repo variable, supports repo-relative
-          CFG="${{ vars.DIGEST_CONFIG }}"
-          if [ -n "$CFG" ]; then
-            if [ -f "$GITHUB_WORKSPACE/$CFG" ]; then CFG="$GITHUB_WORKSPACE/$CFG"; fi
-            if [ -f "$CFG" ]; then
-              echo "Using DIGEST_CONFIG=$CFG"
-              echo "DIGEST_CONFIG=$CFG" >> "$GITHUB_ENV"
-            fi
-          fi
-
       - name: Generate daily digest
         run: |
           set -e
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --format md ${DIGEST_CONFIG:+--config "$DIGEST_CONFIG"} -o outputs/daily.md
-          echo '---- Preview (first 60 lines) ----'
-          head -n 60 outputs/daily.md || true
+          team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+          _A: ${{ secrets.SLACK_WEBHOOK_URL }}
+          _B: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           set -e
+          SLACK_WEBHOOK="${_A:-${_B:-}}"
           if [ -n "$SLACK_WEBHOOK" ]; then
             PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
             curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
