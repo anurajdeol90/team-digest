@@ -2,8 +2,18 @@ name: Weekly Digest (schedule)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"   # Mondays 08:00 local time (see TZ)
-  workflow_dispatch: {}
+    # Every Monday 08:00 local time
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      input_dir:
+        description: "Override INPUT_DIR (repo-relative or absolute)"
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   run:
@@ -22,46 +32,53 @@ jobs:
       - name: Install team-digest
         run: |
           python -m pip install --upgrade pip
-          pip install "team-digest>=1.1.6,<2" jq
+          pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR from packaged examples
-        run: |
-          INPUT_DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
-          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
-
-      - name: Compute weekly date range (previous Mon..Sun in $TZ)
-        run: |
-          python - <<'PY' >> "$GITHUB_ENV"
-          import os, datetime
-          try:
-              from zoneinfo import ZoneInfo
-          except Exception:
-              ZoneInfo = None
-          tz = os.environ.get("TZ","UTC")
-          today = datetime.datetime.now(ZoneInfo(tz) if ZoneInfo else None).date()
-          this_monday = today - datetime.timedelta(days=today.weekday())
-          start = this_monday - datetime.timedelta(days=7)  # previous Monday
-          end = start + datetime.timedelta(days=6)          # previous Sunday
-          print(f"RANGE_FROM={start.isoformat()}")
-          print(f"RANGE_TO={end.isoformat()}")
-          PY
-
-      - name: Generate & post weekly digest
+      - name: Resolve INPUT_DIR
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          WF_INPUT_DIR: ${{ inputs.input_dir }}
+          VAR_DEFAULT_INPUT_DIR: ${{ vars.DEFAULT_INPUT_DIR }}
         run: |
-          mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --format md \
-            --from "$RANGE_FROM" --to "$RANGE_TO" \
-            -o outputs/weekly.md
-          echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/weekly.md || true
-          WEBHOOK="${SLACK_WEBHOOK:-${SLACK_WEBHOOK_URL:-}}"
-          if [ -n "$WEBHOOK" ]; then
-            jq -Rs '{text: ("```" + . + "```")}' < outputs/weekly.md \
-              | curl -fsSL -H 'Content-Type: application/json' --data-binary @- "$WEBHOOK"
+          set -e
+          if [ -n "$WF_INPUT_DIR" ]; then
+            DIR="$WF_INPUT_DIR"
+          elif [ -n "$VAR_DEFAULT_INPUT_DIR" ]; then
+            DIR="$VAR_DEFAULT_INPUT_DIR"
           else
-            echo "No Slack webhook secret set; skipping Slack post."
+            DIR=$(python -c "import pathlib, team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
+          fi
+          echo "INPUT_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "Resolved INPUT_DIR=$DIR"
+
+      - name: Generate weekly digest (Mon–Sun of prior week)
+        run: |
+          set -e
+          # Most recent Monday (on Monday, GNU date's 'last monday' may be today; adjust 7 days back)
+          START=$(TZ="$TZ" date -d 'last monday' +%Y-%m-%d)
+          TODAY_DOW=$(TZ="$TZ" date +%u)  # 1=Mon..7=Sun
+          if [ "$TODAY_DOW" = "1" ]; then
+            START=$(TZ="$TZ" date -d "$START -7 days" +%Y-%m-%d)
+          fi
+          END=$(TZ="$TZ" date -d "$START +6 days" +%Y-%m-%d)
+
+          mkdir -p outputs
+          team-digest --input "$INPUT_DIR" --format md --from "$START" --to "$END" -o outputs/weekly.md
+          echo "Range: $START → $END"
+          echo '---- Preview (first 60 lines) ----'; head -n 60 outputs/weekly.md || true
+
+      - name: Post to Slack (if webhook is set)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          set -e
+          WEBHOOK="${SLACK_WEBHOOK_URL:-$SLACK_WEBHOOK}"
+          if [ -n "$WEBHOOK" ]; then
+            PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
+            curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$WEBHOOK"
+            echo "Posted to Slack."
+          else
+            echo "No Slack webhook configured; skipping post."
           fi
 
       - name: Upload artifact
