@@ -1,4 +1,4 @@
-# team_email_digest.py
+﻿# team_email_digest.py
 # CLI for Team Digest
 # - Correct --version using importlib.metadata (resilient in source/CI)
 # - Stable argparse
@@ -31,7 +31,7 @@ else:
     __version__ = os.environ.get("TEAM_DIGEST_VERSION", "0+source")
 
 # Import generator and optional Slack delivery
-from team_digest_runtime import generate_digest
+from team_digest.team_digest_runtime import generate_digest
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="team-digest",
@@ -120,3 +120,4 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
