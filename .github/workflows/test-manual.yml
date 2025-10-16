@@ -1,0 +1,9 @@
+﻿name: Test Manual Trigger
+on:
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Hello from manual run"
