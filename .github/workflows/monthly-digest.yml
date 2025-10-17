@@ -2,7 +2,7 @@ name: Monthly Digest (previous month)
 
 on:
   schedule:
-    - cron: "0 8 1 * *"  # 1st day 08:00 in your TZ below
+    - cron: "0 8 1 * *"   # 1st day of month at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -17,16 +17,20 @@ jobs:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install team-digest
+        shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
+        shell: bash
         run: |
           set -euo pipefail
           CANDIDATE="${{ github.event.inputs.input_dir }}"
@@ -44,17 +48,27 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute previous calendar month
+      - name: Compute previous calendar month (UTC)
+        shell: bash
         run: |
           set -euo pipefail
           FIRST_THIS=$(date -u +%Y-%m-01)
-          LAST_PREV=$(date -u -d "$FIRST_THIS - 1 day" +%Y-%m-%d)
-          FROM=$(date -u -d "$(date -u -d "$LAST_PREV" +%Y-%m)-01" +%Y-%m-%d)
+          LAST_PREV=$(date -u -d "$FIRST_THIS - 1 day" +%F)
+          FROM=$(date -u -d "$(date -u -d "$LAST_PREV" +%Y-%m)-01" +%F)
           TO="$LAST_PREV"
+          echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
 
+      - name: List candidate files (diagnostics)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
+          echo "Expecting files named notes-YYYY-MM-DD.(md|markdown|txt) within $FROM..$TO"
+
       - name: Generate monthly digest
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
@@ -63,6 +77,7 @@ jobs:
           head -n 40 outputs/monthly.md || true
 
       - name: Resolve Slack webhook (optional)
+        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
@@ -75,6 +90,7 @@ jobs:
 
       - name: Post to Slack (if webhook is set)
         if: env.SLACK_WEBHOOK != ''
+        shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
