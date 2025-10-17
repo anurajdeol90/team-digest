@@ -46,10 +46,19 @@ jobs:
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
+      - name: Resolve Slack webhook (optional)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
+          else
+            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
+          fi
+
       - name: Post to Slack (if webhook is set)
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' || secrets.SLACK_WEBHOOK != '' }}
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+        if: env.SLACK_WEBHOOK != ''
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
