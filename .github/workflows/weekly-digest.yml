@@ -2,7 +2,7 @@ name: Weekly Digest (last full week)
 
 on:
   schedule:
-    # Every Monday at 08:00 in your configured TZ (below)
+    # Every Monday at 08:00 in your configured TZ (see DIGEST_TZ)
     - cron: "0 8 * * 1"
   workflow_dispatch: {}
 
@@ -23,20 +23,21 @@ jobs:
       - name: Install team-digest
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (repo logs by default)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
+          # Prefer a repo variable if defined, otherwise use logs/
           if [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
             INPUT_DIR="${{ vars.DIGEST_INPUT_DIR }}"
           else
             INPUT_DIR="logs"
           fi
-          # Normalize to absolute if it exists under repo
+          # If it's a relative path in the repo, normalize to absolute
           if [ -d "$GITHUB_WORKSPACE/$INPUT_DIR" ]; then
             INPUT_DIR="$GITHUB_WORKSPACE/$INPUT_DIR"
           fi
@@ -46,27 +47,30 @@ jobs:
       - name: Compute last full calendar week (Mon..Sun)
         shell: bash
         run: |
-          set -euo pipefail
-          FROM=$(date -u -d "monday last week" +%Y-%m-%d)
-          TO=$(date -u -d "sunday last week" +%Y-%m-%d)
-          echo "FROM=$FROM  TO=$TO"
+          set -eu
+          # "This Monday" in your TZ
+          THIS_MON=$(TZ="$TZ" date -d "monday this week" +%Y-%m-%d)
+          # Last week's Monday and Sunday
+          FROM=$(TZ="$TZ" date -d "$THIS_MON -7 days" +%Y-%m-%d)
+          TO=$(TZ="$TZ" date -d "$FROM +6 days" +%Y-%m-%d)
+          echo "FROM=$FROM  TO=$TO (TZ=$TZ)"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
-          echo "TO=$TO" >> "$GITHUB_ENV"
+          echo "TO=$TO"   >> "$GITHUB_ENV"
 
       - name: Quick diagnostics (non-blocking)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           echo "All files in $INPUT_DIR (if any):"
           ls -la "$INPUT_DIR" || true
           echo
-          echo "Notes candidates (no date filtering here):"
+          echo "Note files present (not date-filtered):"
           find "$INPUT_DIR" -maxdepth 1 -type f \( -name 'notes-*.md' -o -name 'notes-*.markdown' -o -name 'notes-*.txt' \) -printf '%f\n' 2>/dev/null || true
 
       - name: Generate weekly digest
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
           echo '---- Preview (first 40 lines) ----'
@@ -75,7 +79,7 @@ jobs:
       - name: Resolve Slack webhook (optional)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
             echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
           elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
@@ -88,7 +92,7 @@ jobs:
         if: env.SLACK_WEBHOOK != ''
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
