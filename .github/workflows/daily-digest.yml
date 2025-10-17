@@ -2,7 +2,7 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"  # Weekdays 08:00 in your TZ
+    - cron: "0 8 * * 1-5"   # Weekdays 08:00 in your TZ below
   workflow_dispatch:
     inputs:
       input_dir:
@@ -16,24 +16,17 @@ jobs:
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
 
       - name: Install team-digest
-        shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
-        id: inputdir
-        shell: bash
         run: |
           set -euo pipefail
           CANDIDATE="${{ github.event.inputs.input_dir }}"
@@ -51,77 +44,27 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Normalize & retime logs (markdown + mtime from filename)
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-import os, re, io, time, datetime as dt, pathlib as p
-root = p.Path(os.environ["INPUT_DIR"])
-if not root.exists():
-    raise SystemExit(f"INPUT_DIR missing: {root}")
-sect_map = {"summary","decisions","actions","risks","dependencies","notes"}
-pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
-for f in root.rglob("*"):
-    if not f.is_file(): continue
-    m = pat.match(f.name)
-    # normalize text (UTF-8, LF, headings, bullets)
-    try:
-        t = f.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        t = io.open(f, "r", encoding="utf-8", errors="replace").read()
-    # CRLF → LF, fancy bullets → "- "
-    t = t.replace("\r\n", "\n").replace("• ", "- ").replace("•\t", "- ")
-    # promote bare section names to markdown headings
-    lines = []
-    for line in t.splitlines():
-        s = line.strip().lower()
-        if s in sect_map and not line.lstrip().startswith("#"):
-            lines.append(f"## {line.strip()}")
-        else:
-            lines.append(line)
-    new = "\n".join(lines).strip() + "\n"
-    if new != t:
-        f.write_text(new, encoding="utf-8")
-    # set mtime from filename (noon in repo TZ)
-    if m:
-        day = dt.date.fromisoformat(m.group(1))
-        noon = dt.datetime.combine(day, dt.time(12,0))
-        ts = noon.timestamp()
-        os.utime(f, (ts, ts))
-print("Normalization complete.")
-PY
-
-      - name: Compute today window
-        shell: bash
+      - name: Compute today range (single day)
         run: |
           set -euo pipefail
           FROM=$(date -u +%Y-%m-%d)
           TO="$FROM"
-          echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
 
-      - name: Generate daily digest (single-date header)
-        shell: bash
+      - name: Generate daily digest (normalize single-date header)
         run: |
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/daily.md
-          # collapse "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" if both equal
-          python - <<'PY'
-import re, io
-p="outputs/daily.md"; t=io.open(p,"r",encoding="utf-8").read()
-m=re.search(r'^(# Team Digest \()(\d{4}-\d{2}-\d{2}) - \2(\))',t,re.M)
-if m:
-    t=t.replace(m.group(0), f"{m.group(1)}{m.group(2)}{m.group(3)}",1)
-    io.open(p,"w",encoding="utf-8").write(t)
-PY
+          # if header says "(YYYY-MM-DD - YYYY-MM-DD)", collapse to "(YYYY-MM-DD)"
+          python -c "import re,io; p='outputs/daily.md'; t=io.open(p,'r',encoding='utf-8').read(); \
+m=re.search(r'^(# Team Digest \\()(\\d{4}-\\d{2}-\\d{2}) - \\2(\\))', t, re.M); \
+io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), f\"{m.group(1)}{m.group(2)}{m.group(3)}\", 1)) if m else None"
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
       - name: Resolve Slack webhook (optional)
-        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
@@ -134,14 +77,12 @@ PY
 
       - name: Post to Slack (if webhook is set)
         if: env.SLACK_WEBHOOK != ''
-        shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: daily-digest
           path: outputs/**
