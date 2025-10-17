@@ -1,1 +1,92 @@
-﻿# (paste the YAML above here exactly)
+﻿name: Weekly Digest (schedule)
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"          # Mondays 08:00 in TZ below
+  workflow_dispatch:
+    inputs:
+      INPUT_DIR:
+        description: "Override INPUT_DIR (repo-relative or absolute)"
+        required: false
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install team-digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install "team-digest>=1.1.6,<2"
+
+      - name: Resolve INPUT_DIR (override → repo var → 'logs')
+        shell: bash
+        env:
+          OVERRIDE: ${{ github.event.inputs.INPUT_DIR }}
+          VAR_DIR: ${{ vars.DIGEST_INPUT_DIR }}
+        run: |
+          set -euo pipefail
+          CANDIDATE="${OVERRIDE:-}"
+          if [ -z "$CANDIDATE" ] && [ -n "${VAR_DIR:-}" ]; then CANDIDATE="$VAR_DIR"; fi
+          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
+          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          else INPUT_DIR="$CANDIDATE"; fi
+          echo "Resolved INPUT_DIR=$INPUT_DIR"
+          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
+
+      - name: Compute last full calendar week (Mon..Sun, UTC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          FROM=$(date -u -d "monday last week" +%Y-%m-%d)
+          TO=$(date -u -d "sunday last week" +%Y-%m-%d)
+          echo "FROM=$FROM  TO=$TO"
+          echo "FROM=$FROM" >> "$GITHUB_ENV"
+          echo "TO=$TO" >> "$GITHUB_ENV"
+
+      - name: Generate weekly digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs
+          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/weekly.md || true
+
+      - name: Resolve Slack webhook (optional)
+        shell: bash
+        env:
+          A: ${{ secrets.SLACK_WEBHOOK_URL }}
+          B: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          if [ -n "${A:-}" ]; then echo "SLACK_WEBHOOK=$A" >> "$GITHUB_ENV"
+          elif [ -n "${B:-}" ]; then echo "SLACK_WEBHOOK=$B" >> "$GITHUB_ENV"
+          else echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"; fi
+
+      - name: Post to Slack (if webhook is set)
+        if: env.SLACK_WEBHOOK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-digest
+          path: outputs/**
