@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FROM=$(date +%F)   # honors TZ from env
+          FROM=$(date +%F)   # honors TZ
           TO="$FROM"
           echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
           echo "TO=$TO"     | tee -a "$GITHUB_ENV"
@@ -68,23 +68,15 @@ jobs:
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
-      # Cosmetic: normalize "(YYYY-MM-DD - same)" → "(YYYY-MM-DD)". Safe if it fails.
+      # Cosmetic: if header is "(YYYY-MM-DD - YYYY-MM-DD)" with same date, rewrite to "(YYYY-MM-DD)"
       - name: Normalize single-date header (best effort)
         shell: bash
         continue-on-error: true
         run: |
-          python <<'PY'
-import re, io
-p = "outputs/daily.md"
-try:
-  t = io.open(p, "r", encoding="utf-8").read()
-  m = re.search(r'^(#\s*Team\s+Digest\s*\()(\d{4}-\d{2}-\d{2})\s*-\s*\2(\))', t, re.M)
-  if m:
-      t = t.replace(m.group(0), f"{m.group(1)}{m.group(2)}{m.group(3)}", 1)
-      io.open(p, "w", encoding="utf-8").write(t)
-except Exception:
-  pass
-PY
+          python -c "import re,io; p='outputs/daily.md'; \
+t=io.open(p,'r',encoding='utf-8').read(); \
+m=re.search(r'^(#\\s*Team\\s+Digest\\s*\\()(\\d{4}-\\d{2}-\\d{2})\\s*-\\s*\\2(\\))', t, re.M); \
+io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), m.group(1)+m.group(2)+m.group(3), 1)) if m else None" || true
 
       - name: Resolve Slack webhook (optional)
         shell: bash
