@@ -38,17 +38,43 @@ jobs:
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
           [ -z "$CANDIDATE" ] && CANDIDATE="logs"
-          if [ -d "$CANDIDATE" ]; then
-            INPUT_DIR="$CANDIDATE"
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
-          else
-            INPUT_DIR="$CANDIDATE"
-          fi
+          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE";
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ] ; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
+          else INPUT_DIR="$CANDIDATE"; fi
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute previous calendar month (FROM..TO)
+      - name: Normalize & retime logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
+            root=p.Path(os.environ['INPUT_DIR']); \
+            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
+            sect={'summary','decisions','actions','risks','dependencies','notes'}; \
+            def fix(t): \
+              t=t.replace('\\r\\n','\\n').replace('•\\t','- ').replace('• ','- '); \
+              t=re.sub(r'\\\\#','#',t); t=re.sub(r'\\\\\\[','[',t); \
+              lines=[]; \
+              for line in t.splitlines(): \
+                s=line.strip().lower(); \
+                if s in sect and not line.lstrip().startswith('#'): lines.append('## '+line.strip()); \
+                else: lines.append(line); \
+              return '\\n'.join(lines).strip()+'\\n'; \
+            if root.exists(): \
+              for f in root.rglob('*'): \
+                if not f.is_file(): continue; \
+                m=pat.match(f.name); \
+                try: t=f.read_text(encoding='utf-8',errors='replace'); \
+                except Exception: t=io.open(f,'r',encoding='utf-8',errors='replace').read(); \
+                new=fix(t); \
+                if new!=t: f.write_text(new,encoding='utf-8'); \
+                if m: \
+                  day=dt.date.fromisoformat(m.group(1)); noon=dt.datetime.combine(day,dt.time(12,0)); ts=noon.timestamp(); \
+                  os.utime(f,(ts,ts))"
+
+      - name: Compute previous calendar month
+        shell: bash
         run: |
           set -euo pipefail
           FIRST_THIS=$(date +%Y-%m-01)

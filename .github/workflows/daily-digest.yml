@@ -48,7 +48,37 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute today's range
+      - name: Normalize & retime logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
+            root=p.Path(os.environ['INPUT_DIR']); \
+            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
+            sect={'summary','decisions','actions','risks','dependencies','notes'}; \
+            def fix(t): \
+              t=t.replace('\\r\\n','\\n').replace('•\\t','- ').replace('• ','- '); \
+              t=re.sub(r'\\\\#','#',t); t=re.sub(r'\\\\\\[','[',t); \
+              lines=[]; \
+              for line in t.splitlines(): \
+                s=line.strip().lower(); \
+                if s in sect and not line.lstrip().startswith('#'): lines.append('## '+line.strip()); \
+                else: lines.append(line); \
+              return '\\n'.join(lines).strip()+'\\n'; \
+            if root.exists(): \
+              for f in root.rglob('*'): \
+                if not f.is_file(): continue; \
+                m=pat.match(f.name); \
+                try: t=f.read_text(encoding='utf-8',errors='replace'); \
+                except Exception: t=io.open(f,'r',encoding='utf-8',errors='replace').read(); \
+                new=fix(t); \
+                if new!=t: f.write_text(new,encoding='utf-8'); \
+                if m: \
+                  day=dt.date.fromisoformat(m.group(1)); noon=dt.datetime.combine(day,dt.time(12,0)); ts=noon.timestamp(); \
+                  os.utime(f,(ts,ts))"
+
+      - name: Compute today range (single date)
+        shell: bash
         run: |
           set -euo pipefail
           FROM=$(date +%Y-%m-%d)
@@ -82,9 +112,9 @@ jobs:
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/daily.md
-          # If the header line uses "(YYYY-MM-DD - YYYY-MM-DD)" with same dates, collapse to one date
-          awk 'NR==1 && match($0,/^# Team Digest \(([0-9-]+) - ([0-9-]+)\)$/,a){ if(a[1]==a[2]){$0="# Team Digest (" a[1] ")"} }1' \
-            outputs/daily.md > outputs/daily.tmp && mv outputs/daily.tmp outputs/daily.md
+          python -c "import re,io; p='outputs/daily.md'; t=io.open(p,'r',encoding='utf-8').read(); \
+            m=re.search(r'^(# Team Digest \\()(\\d{4}-\\d{2}-\\d{2}) - \\2(\\))', t, re.M); \
+            io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), f'{m.group(1)}{m.group(2)}{m.group(3)}', 1)) if m else None"
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 

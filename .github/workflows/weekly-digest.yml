@@ -48,15 +48,45 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
+      - name: Normalize & retime logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
+            root=p.Path(os.environ['INPUT_DIR']); \
+            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
+            sect={'summary','decisions','actions','risks','dependencies','notes'}; \
+            def fix(t): \
+              t=t.replace('\\r\\n','\\n').replace('•\\t','- ').replace('• ','- '); \
+              t=re.sub(r'\\\\#','#',t); t=re.sub(r'\\\\\\[','[',t); \
+              lines=[]; \
+              for line in t.splitlines(): \
+                s=line.strip().lower(); \
+                if s in sect and not line.lstrip().startswith('#'): lines.append('## '+line.strip()); \
+                else: lines.append(line); \
+              return '\\n'.join(lines).strip()+'\\n'; \
+            if root.exists(): \
+              for f in root.rglob('*'): \
+                if not f.is_file(): continue; \
+                m=pat.match(f.name); \
+                try: t=f.read_text(encoding='utf-8',errors='replace'); \
+                except Exception: t=io.open(f,'r',encoding='utf-8',errors='replace').read(); \
+                new=fix(t); \
+                if new!=t: f.write_text(new,encoding='utf-8'); \
+                if m: \
+                  day=dt.date.fromisoformat(m.group(1)); noon=dt.datetime.combine(day,dt.time(12,0)); ts=noon.timestamp(); \
+                  os.utime(f,(ts,ts))"
+
       - name: Compute last full calendar week (Mon..Sun)
         run: |
           set -euo pipefail
-          THIS_MON=$(date -d "monday this week" +%Y-%m-%d)
-          FROM=$(date -d "$THIS_MON - 7 days" +%Y-%m-%d)
-          TO=$(date -d "$THIS_MON - 1 day" +%Y-%m-%d)
-          echo "FROM=$FROM  TO=$TO"
-          echo "FROM=$FROM" >> "$GITHUB_ENV"
-          echo "TO=$TO" >> "$GITHUB_ENV"
+          python -c "from datetime import date,timedelta; \
+            today=date.today(); \
+            this_mon = today - timedelta(days=today.weekday()); \
+            last_mon = this_mon - timedelta(days=7); \
+            last_sun = last_mon + timedelta(days=6); \
+            print('FROM='+last_mon.isoformat()); print('TO='+last_sun.isoformat())" >> "$GITHUB_ENV"
+          echo "Range: $FROM → $TO"
 
       - name: List candidate files (diagnostics)
         run: |
