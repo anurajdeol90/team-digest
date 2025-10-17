@@ -2,7 +2,7 @@
 
 on:
   schedule:
-    - cron: "0 8 * * 1"   # Mondays at 08:00
+    - cron: "0 8 * * 1"     # Mondays at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -16,9 +16,14 @@ jobs:
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install team-digest
         run: |
           set -euo pipefail
@@ -32,44 +37,26 @@ jobs:
           if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
-          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
-          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE";
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
-          else INPUT_DIR="$CANDIDATE"; fi
+          if [ -z "$CANDIDATE" ]; then
+            CANDIDATE="logs"
+          fi
+          if [ -d "$CANDIDATE" ]; then
+            INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          else
+            INPUT_DIR="$CANDIDATE"
+          fi
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute last full calendar week (Mon..Sun)
+      - name: Compute last full calendar week (Mon..Sun, UTC)
         run: |
           set -euo pipefail
           FROM=$(date -u -d "monday last week" +%Y-%m-%d)
           TO=$(date -u -d "sunday last week" +%Y-%m-%d)
-          echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
-
-      - name: List candidate files (diagnostics)
-        run: |
-          set -euo pipefail
-          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
-          echo
-          echo "Files matching notes-YYYY-MM-DD.* in $FROM..$TO:"
-          python - <<'PY'
-import os, re, datetime as dt, pathlib as p
-d = p.Path(os.environ["INPUT_DIR"])
-frm = dt.date.fromisoformat(os.environ["FROM"])
-to  = dt.date.fromisoformat(os.environ["TO"])
-pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
-matches = []
-if d.is_dir():
-  for f in sorted(d.iterdir()):
-    m = pat.match(f.name)
-    if not m: continue
-    day = dt.date.fromisoformat(m.group(1))
-    if frm <= day <= to:
-      matches.append(f.name)
-print("MATCHES:", ", ".join(matches) if matches else "(none)")
-PY
 
       - name: Generate weekly digest
         run: |
@@ -97,5 +84,8 @@ PY
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      - uses: actions/upload-artifact@v4
-        with: { name: weekly-digest, path: outputs/** }
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-digest
+          path: outputs/**

@@ -2,7 +2,7 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # Weekdays at 08:00 (your TZ below)
+    - cron: "0 8 * * 1-5"   # Weekdays at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -50,53 +50,21 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute today range
+      - name: Compute today window
         run: |
           set -euo pipefail
           FROM=$(date -u +%Y-%m-%d)
           TO="$FROM"
-          echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
 
-      - name: List candidate files (diagnostics)
-        run: |
-          set -euo pipefail
-          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
-          echo
-          echo "Files matching notes-YYYY-MM-DD.* in $FROM..$TO:"
-          python - <<'PY'
-import os, re, datetime as dt, pathlib as p
-d = p.Path(os.environ["INPUT_DIR"])
-frm = dt.date.fromisoformat(os.environ["FROM"])
-to  = dt.date.fromisoformat(os.environ["TO"])
-pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
-matches = []
-if d.is_dir():
-  for f in sorted(d.iterdir()):
-    m = pat.match(f.name)
-    if not m: continue
-    day = dt.date.fromisoformat(m.group(1))
-    if frm <= day <= to:
-      matches.append(f.name)
-print("MATCHES:", ", ".join(matches) if matches else "(none)")
-PY
-
-      - name: Generate daily digest (single-date header)
+      - name: Generate daily digest (normalize single date)
         run: |
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/daily.md
-          # If the tool printed "(YYYY-MM-DD - YYYY-MM-DD)" with same date, normalize to single date
-          python - <<'PY'
-import re, io
-p = "outputs/daily.md"
-t = io.open(p, "r", encoding="utf-8").read()
-m = re.search(r'^(# Team Digest \()(\d{4}-\d{2}-\d{2}) - \2(\))', t, re.M)
-if m:
-    t = t.replace(m.group(0), f"{m.group(1)}{m.group(2)}{m.group(3)}", 1)
-    io.open(p, "w", encoding="utf-8").write(t)
-PY
+          # If header is "(YYYY-MM-DD - YYYY-MM-DD)" and both dates equal, collapse to "(YYYY-MM-DD)"
+          awk 'NR==1 && match($0,/^# Team Digest \(([0-9-]+) - ([0-9-]+)\)\s*$/,a){ if(a[1]==a[2]){ sub(/\([0-9-]+ - [0-9-]+\)/,"(" a[1] ")") } } {print}' outputs/daily.md > outputs/daily.tmp && mv outputs/daily.tmp outputs/daily.md
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
