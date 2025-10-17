@@ -2,7 +2,7 @@ name: Monthly Digest (previous month)
 
 on:
   schedule:
-    - cron: "0 8 1 * *"  # 1st day at 08:00 in your configured TZ
+    - cron: "0 8 1 * *"   # 1st day of month at 08:00 (your TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -16,19 +16,21 @@ jobs:
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install team-digest
-        shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
-        shell: bash
         run: |
           set -euo pipefail
           CANDIDATE="${{ github.event.inputs.input_dir }}"
@@ -75,38 +77,43 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "from datetime import date, timedelta; \
-            first_this = date.today().replace(day=1); \
-            last_prev = first_this - timedelta(days=1); \
-            first_prev = last_prev.replace(day=1); \
-            print('FROM='+first_prev.isoformat()); print('TO='+last_prev.isoformat())" >> "$GITHUB_ENV"
-          echo "Range: $FROM → $TO"
+          FIRST_THIS=$(date +%Y-%m-01)
+          LAST_PREV=$(date -d "$FIRST_THIS - 1 day" +%Y-%m-%d)
+          FROM=$(date -d "$(date -d "$LAST_PREV" +%Y-%m)-01" +%Y-%m-%d)
+          TO="$LAST_PREV"
+          echo "FROM=$FROM  TO=$TO"
+          echo "FROM=$FROM" >> "$GITHUB_ENV"
+          echo "TO=$TO" >> "$GITHUB_ENV"
 
       - name: List candidate files (diagnostics)
-        shell: bash
         run: |
           set -euo pipefail
           echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
           echo
-          echo "Files matching notes-YYYY-MM-DD.* within $FROM..$TO:"
-          python -c "import os,re,datetime as dt,pathlib as p; \
-            d=p.Path(os.environ['INPUT_DIR']); frm=dt.date.fromisoformat(os.environ['FROM']); to=dt.date.fromisoformat(os.environ['TO']); \
-            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$',re.I); ms=[]; \
-            (d.exists() and d.is_dir()) and [ms.append(f.name) for f in sorted(d.iterdir()) \
-              if pat.match(f.name) and frm<=dt.date.fromisoformat(pat.match(f.name).group(1))<=to]; \
-            print('MATCHES:', ', '.join(ms) if ms else '(none)')"
+          echo "Matches within $FROM..$TO:"
+          shopt -s nullglob
+          found=0
+          for f in "$INPUT_DIR"/notes-*.md "$INPUT_DIR"/notes-*.markdown "$INPUT_DIR"/notes-*.txt; do
+            bn=$(basename "$f")
+            if [[ $bn =~ notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
+              d="${BASH_REMATCH[1]}"
+              if [[ "$d" >= "$FROM" && "$d" <= "$TO" ]]; then
+                echo "  $bn"
+                found=1
+              fi
+            fi
+          done
+          if [ $found -eq 0 ]; then echo "(none)"; fi
 
       - name: Generate monthly digest
-        shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/monthly.md
-          echo '---- Preview (first 60 lines) ----'
-          head -n 60 outputs/monthly.md || true
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/monthly.md || true
 
       - name: Resolve Slack webhook (optional)
-        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
@@ -119,13 +126,13 @@ jobs:
 
       - name: Post to Slack (if webhook is set)
         if: env.SLACK_WEBHOOK != ''
-        shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: monthly-digest
           path: outputs/**
