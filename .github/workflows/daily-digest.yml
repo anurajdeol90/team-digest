@@ -2,13 +2,8 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # 08:00 local time (see DIGEST_TZ)
-  workflow_dispatch:
-    inputs:
-      INPUT_DIR:
-        description: "Override INPUT_DIR (repo-relative or absolute)"
-        required: false
-        type: string
+    - cron: "0 8 * * 1-5"   # Weekdays at 08:00 (see TZ variable)
+  workflow_dispatch: {}
 
 jobs:
   run:
@@ -29,50 +24,45 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR (override → repo var → logs/ → examples)
+      - name: Resolve INPUT_DIR (repo logs by default)
         run: |
           set -e
-          CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"; fi
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"; fi
-          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
-
-          if [ -d "$CANDIDATE" ]; then
-            INPUT_DIR="$CANDIDATE"
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          if [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+            INPUT_DIR="${{ vars.DIGEST_INPUT_DIR }}"
           else
-            INPUT_DIR=""
+            INPUT_DIR="logs"
           fi
-
-          if [ -z "$INPUT_DIR" ]; then
-            INPUT_DIR=$(python -c "import pathlib,team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
-          fi
-
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate daily digest
+      - name: Generate daily digest (normalize single date)
         run: |
           set -e
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
+
+          # Rewrite header "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" if both dates match
+          python - <<'PY'
+import re, io
+path = "outputs/daily.md"
+t = io.open(path, "r", encoding="utf-8").read()
+m = re.match(r'(# Team Digest \()(\d{4}-\d{2}-\d{2}) - (\d{4}-\d{2}-\d{2})(\))', t)
+if m and m.group(2) == m.group(3):
+    new = f"{m.group(1)}{m.group(2)}{m.group(4)}"
+    t = t.replace(m.group(0), new, 1)
+    io.open(path, "w", encoding="utf-8").write(t)
+PY
+
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
+        if: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
         env:
-          _A: ${{ secrets.SLACK_WEBHOOK_URL }}
-          _B: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
         run: |
-          set -e
-          SLACK_WEBHOOK="${_A:-${_B:-}}"
-          if [ -n "$SLACK_WEBHOOK" ]; then
-            PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
-            curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
-          else
-            echo "SLACK_WEBHOOK not set—skipping Slack post."
-          fi
+          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
