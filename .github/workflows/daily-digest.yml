@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import os,re,io,datetime as dt,time,pathlib as p; \
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
             root=p.Path(os.environ['INPUT_DIR']); \
             pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
             sect={'summary','decisions','actions','risks','dependencies','notes'}; \
@@ -101,7 +101,6 @@ jobs:
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/daily.md
-          # Normalize header "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" when both dates are same
           python -c "import re,io; p='outputs/daily.md'; t=io.open(p,'r',encoding='utf-8').read(); \
             m=re.search(r'^(# Team Digest \\()(\\d{4}-\\d{2}-\\d{2}) - \\2(\\))', t, re.M); \
             io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), f'{m.group(1)}{m.group(2)}{m.group(3)}', 1)) if m else None"

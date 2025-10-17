@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import os,re,io,datetime as dt,time,pathlib as p; \
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
             root=p.Path(os.environ['INPUT_DIR']); \
             pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
             sect={'summary','decisions','actions','risks','dependencies','notes'}; \
@@ -77,7 +77,6 @@ jobs:
           set -euo pipefail
           python -c "from datetime import date,timedelta; \
             today=date.today(); \
-            # Monday of this week, then step back 7 days to get the previous week
             this_mon = today - timedelta(days=today.weekday()); \
             last_mon = this_mon - timedelta(days=7); \
             last_sun = last_mon + timedelta(days=6); \

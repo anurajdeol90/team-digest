@@ -37,7 +37,7 @@ jobs:
           fi
           [ -z "$CANDIDATE" ] && CANDIDATE="logs"
           if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE";
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ] ; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
           else INPUT_DIR="$CANDIDATE"; fi
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import os,re,io,datetime as dt,time,pathlib as p; \
+          python -c "import os,re,io,datetime as dt,pathlib as p; \
             root=p.Path(os.environ['INPUT_DIR']); \
             pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
             sect={'summary','decisions','actions','risks','dependencies','notes'}; \
