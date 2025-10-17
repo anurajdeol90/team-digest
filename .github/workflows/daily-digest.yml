@@ -36,17 +36,13 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate daily digest
+      - name: Generate daily digest (normalize single date)
         run: |
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
-          # Fix header "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" if both dates match
-          python -c "import re, pathlib; \
-p = pathlib.Path('outputs/daily.md'); \
-t = p.read_text(encoding='utf-8'); \
-m = re.search(r'^(# Team Digest \()(\d{4}-\d{2}-\d{2}) - (\d{4}-\d{2}-\d{2})(\))', t, re.M); \
-(p.write_text(t.replace(m.group(0), f'{m.group(1)}{m.group(2)}{m.group(4)}', 1), encoding='utf-8') if m and m.group(2)==m.group(3) else None)"
+          # Normalize "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" when dates match
+          python -c "import re,io; p='outputs/daily.md'; t=io.open(p,'r',encoding='utf-8').read(); m=re.search(r'^(# Team Digest \()(\d{4}-\d{2}-\d{2}) - (\d{4}-\d{2}-\d{2})(\))', t, re.M); io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), m.group(1)+m.group(2)+m.group(4), 1)) if m and m.group(2)==m.group(3) else None"
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
