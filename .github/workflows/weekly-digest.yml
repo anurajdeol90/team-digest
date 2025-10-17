@@ -2,13 +2,8 @@ name: Weekly Digest (schedule)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"     # Monday 08:00 (see DIGEST_TZ)
-  workflow_dispatch:
-    inputs:
-      INPUT_DIR:
-        description: "Override INPUT_DIR (repo-relative or absolute)"
-        required: false
-        type: string
+    - cron: "0 8 * * 1"     # Mondays at 08:00 (see TZ variable)
+  workflow_dispatch: {}
 
 jobs:
   run:
@@ -26,54 +21,49 @@ jobs:
 
       - name: Install team-digest
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR (override → repo var → logs/ → examples)
+      - name: Resolve INPUT_DIR (repo logs by default)
         run: |
-          set -e
-          CANDIDATE="${{ github.event.inputs.INPUT_DIR }}"
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"; fi
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DEFAULT_INPUT_DIR }}" ]; then CANDIDATE="${{ vars.DEFAULT_INPUT_DIR }}"; fi
-          if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
-
-          if [ -d "$CANDIDATE" ]; then
-            INPUT_DIR="$CANDIDATE"
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          set -euo pipefail
+          if [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+            INPUT_DIR="${{ vars.DIGEST_INPUT_DIR }}"
           else
-            INPUT_DIR=""
+            INPUT_DIR="logs"
           fi
-
-          if [ -z "$INPUT_DIR" ]; then
-            INPUT_DIR=$(python -c "import pathlib,team_digest; print(pathlib.Path(team_digest.__file__).parent/'examples'/'logs')")
-          fi
-
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate & post weekly digest
-        env:
-          _A: ${{ secrets.SLACK_WEBHOOK_URL }}
-          _B: ${{ secrets.SLACK_WEBHOOK }}
+      - name: Generate weekly digest (Mon..Sun of this week)
         run: |
-          set -e
-          # compute local week range using TZ
-          MON=$(date -d "monday this week" +%F)
-          SUN=$(date -d "$MON +6 days" +%F)
-
+          set -euo pipefail
+          FROM=$(date -u -d "monday this week" +%Y-%m-%d)
+          TO=$(date -u -d "sunday this week" +%Y-%m-%d)
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --from "$MON" --to "$SUN" --format md -o outputs/weekly.md
+          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
+          echo "Range: $FROM → $TO"
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/weekly.md || true
 
-          SLACK_WEBHOOK="${_A:-${_B:-}}"
-          if [ -n "$SLACK_WEBHOOK" ]; then
-            PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
-            curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+      - name: Resolve Slack webhook (optional)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
           else
-            echo "SLACK_WEBHOOK not set—skipping Slack post."
+            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
           fi
+
+      - name: Post to Slack (if webhook is set)
+        if: env.SLACK_WEBHOOK != ''
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
