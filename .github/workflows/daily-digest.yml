@@ -57,7 +57,8 @@ jobs:
           set -e
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
-          echo '---- Preview (first 40 lines) ----'; head -n 40 outputs/daily.md || true
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/daily.md || true
 
       - name: Post to Slack (if webhook is set)
         env:

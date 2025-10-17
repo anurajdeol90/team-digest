@@ -58,12 +58,13 @@ jobs:
           _B: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           set -e
-          FIRST=$(date -u +%Y-%m-01)
-          LAST=$(date -u -d "$FIRST +1 month -1 day" +%Y-%m-%d)
+          FIRST=$(date +%Y-%m-01)
+          LAST=$(date -d "$FIRST +1 month -1 day" +%F)
 
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FIRST" --to "$LAST" --format md -o outputs/monthly.md
-          echo '---- Preview (first 40 lines) ----'; head -n 40 outputs/monthly.md || true
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/monthly.md || true
 
           SLACK_WEBHOOK="${_A:-${_B:-}}"
           if [ -n "$SLACK_WEBHOOK" ]; then

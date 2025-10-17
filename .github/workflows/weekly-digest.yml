@@ -58,12 +58,14 @@ jobs:
           _B: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           set -e
-          FROM=$(date -u -d "monday this week" +%Y-%m-%d)
-          TO=$(date -u -d "sunday this week" +%Y-%m-%d)
+          # compute local week range using TZ
+          MON=$(date -d "monday this week" +%F)
+          SUN=$(date -d "$MON +6 days" +%F)
 
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
-          echo '---- Preview (first 40 lines) ----'; head -n 40 outputs/weekly.md || true
+          team-digest --input "$INPUT_DIR" --from "$MON" --to "$SUN" --format md -o outputs/weekly.md
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/weekly.md || true
 
           SLACK_WEBHOOK="${_A:-${_B:-}}"
           if [ -n "$SLACK_WEBHOOK" ]; then
