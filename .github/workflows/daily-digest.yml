@@ -2,7 +2,7 @@ name: Daily Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"   # Weekdays at 08:00 (see TZ variable)
+    - cron: "0 8 * * 1-5"   # Weekdays at 08:00 in your configured TZ
   workflow_dispatch: {}
 
 jobs:
@@ -21,12 +21,14 @@ jobs:
 
       - name: Install team-digest
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (repo logs by default)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           if [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
             INPUT_DIR="${{ vars.DIGEST_INPUT_DIR }}"
           else
@@ -36,31 +38,43 @@ jobs:
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
       - name: Generate daily digest (normalize single date)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --format md -o outputs/daily.md
 
-          # Rewrite header "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" if both dates match
+          # Normalize header "(YYYY-MM-DD - YYYY-MM-DD)" → "(YYYY-MM-DD)" if both dates match
           python - <<'PY'
 import re, io
-path = "outputs/daily.md"
-t = io.open(path, "r", encoding="utf-8").read()
-m = re.match(r'(# Team Digest \()(\d{4}-\d{2}-\d{2}) - (\d{4}-\d{2}-\d{2})(\))', t)
+p = "outputs/daily.md"
+t = io.open(p, "r", encoding="utf-8").read()
+m = re.search(r'^(# Team Digest \()(\d{4}-\d{2}-\d{2}) - (\d{4}-\d{2}-\d{2})(\))', t, re.M)
 if m and m.group(2) == m.group(3):
-    new = f"{m.group(1)}{m.group(2)}{m.group(4)}"
-    t = t.replace(m.group(0), new, 1)
-    io.open(path, "w", encoding="utf-8").write(t)
+    t = t.replace(m.group(0), f"{m.group(1)}{m.group(2)}{m.group(4)}", 1)
+    io.open(p, "w", encoding="utf-8").write(t)
 PY
 
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/daily.md || true
 
-      - name: Post to Slack (if webhook is set)
-        if: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK }}
+      - name: Resolve Slack webhook (optional)
+        shell: bash
         run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
+          else
+            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Post to Slack (if webhook is set)
+        if: env.SLACK_WEBHOOK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/daily.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
