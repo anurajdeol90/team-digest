@@ -1,11 +1,11 @@
-name: Monthly Digest (schedule)
+name: Monthly Digest (previous month)
 
 on:
   schedule:
-    - cron: "0 8 1 * *"         # 1st of month 08:00 in TZ below
+    - cron: "0 8 1 * *"   # 1st day 08:00
   workflow_dispatch:
     inputs:
-      INPUT_DIR:
+      input_dir:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
         type: string
@@ -16,49 +16,64 @@ jobs:
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
       - name: Install team-digest
-        shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      - name: Resolve INPUT_DIR (override → repo var → 'logs')
-        shell: bash
-        env:
-          OVERRIDE: ${{ github.event.inputs.INPUT_DIR }}
-          VAR_DIR: ${{ vars.DIGEST_INPUT_DIR }}
+      - name: Resolve INPUT_DIR (override → repo var → logs/)
         run: |
           set -euo pipefail
-          CANDIDATE="${OVERRIDE:-}"
-          if [ -z "$CANDIDATE" ] && [ -n "${VAR_DIR:-}" ]; then CANDIDATE="$VAR_DIR"; fi
+          CANDIDATE="${{ github.event.inputs.input_dir }}"
+          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
+          fi
           if [ -z "$CANDIDATE" ]; then CANDIDATE="logs"; fi
-          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE"
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE";
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
           else INPUT_DIR="$CANDIDATE"; fi
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute previous calendar month (UTC)
-        shell: bash
+      - name: Compute previous calendar month
         run: |
           set -euo pipefail
-          FROM=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-01)
-          TO=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%d)
+          # First day of current month, then step back 1 day -> last day prev month
+          LAST_PREV=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%d)
+          FROM=$(date -u -d "$(echo $LAST_PREV | cut -c1-7)-01" +%Y-%m-%d)
+          TO="$LAST_PREV"
           echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
 
+      - name: List candidate files (diagnostics)
+        run: |
+          set -euo pipefail
+          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
+          echo
+          echo "Files matching notes-YYYY-MM-DD.* in $FROM..$TO:"
+          python - <<'PY'
+import os, re, datetime as dt, pathlib as p
+d = p.Path(os.environ["INPUT_DIR"])
+frm = dt.date.fromisoformat(os.environ["FROM"])
+to  = dt.date.fromisoformat(os.environ["TO"])
+pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+matches = []
+if d.is_dir():
+  for f in sorted(d.iterdir()):
+    m = pat.match(f.name)
+    if not m: continue
+    day = dt.date.fromisoformat(m.group(1))
+    if frm <= day <= to:
+      matches.append(f.name)
+print("MATCHES:", ", ".join(matches) if matches else "(none)")
+PY
+
       - name: Generate monthly digest
-        shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
@@ -67,26 +82,22 @@ jobs:
           head -n 40 outputs/monthly.md || true
 
       - name: Resolve Slack webhook (optional)
-        shell: bash
-        env:
-          A: ${{ secrets.SLACK_WEBHOOK_URL }}
-          B: ${{ secrets.SLACK_WEBHOOK }}
         run: |
           set -euo pipefail
-          if [ -n "${A:-}" ]; then echo "SLACK_WEBHOOK=$A" >> "$GITHUB_ENV"
-          elif [ -n "${B:-}" ]; then echo "SLACK_WEBHOOK=$B" >> "$GITHUB_ENV"
-          else echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"; fi
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
+          else
+            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
+          fi
 
       - name: Post to Slack (if webhook is set)
         if: env.SLACK_WEBHOOK != ''
-        shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: monthly-digest
-          path: outputs/**
+      - uses: actions/upload-artifact@v4
+        with: { name: monthly-digest, path: outputs/** }
