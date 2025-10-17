@@ -2,7 +2,7 @@ name: Weekly Digest (last full week)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"  # Mondays at 08:00 in your configured TZ
+    - cron: "0 8 * * 1"   # Mondays at 08:00 in your TZ (see DIGEST_TZ)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -13,12 +13,16 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install team-digest
         shell: bash
@@ -36,67 +40,109 @@ jobs:
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
           [ -z "$CANDIDATE" ] && CANDIDATE="logs"
-          if [ -d "$CANDIDATE" ]; then INPUT_DIR="$CANDIDATE";
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE";
-          else INPUT_DIR="$CANDIDATE"; fi
+
+          if [ -d "$CANDIDATE" ]; then
+            INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          else
+            INPUT_DIR="$CANDIDATE"
+          fi
+
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Normalize & retime logs
+      - name: Compute last full calendar week (Mon..Sun) in TZ
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import os,re,io,datetime as dt,time,pathlib as p; \
-            root=p.Path(os.environ['INPUT_DIR']); \
-            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
-            sect={'summary','decisions','actions','risks','dependencies','notes'}; \
-            def fix(t): \
-              t=t.replace('\\r\\n','\\n').replace('•\\t','- ').replace('• ','- '); \
-              t=re.sub(r'\\\\#','#',t); t=re.sub(r'\\\\\\[','[',t); \
-              lines=[]; \
-              for line in t.splitlines(): \
-                s=line.strip().lower(); \
-                if s in sect and not line.lstrip().startswith('#'): lines.append('## '+line.strip()); \
-                else: lines.append(line); \
-              return '\\n'.join(lines).strip()+'\\n'; \
-            if root.exists(): \
-              for f in root.rglob('*'): \
-                if not f.is_file(): continue; \
-                m=pat.match(f.name); \
-                try: t=f.read_text(encoding='utf-8',errors='replace'); \
-                except Exception: t=io.open(f,'r',encoding='utf-8',errors='replace').read(); \
-                new=fix(t); \
-                if new!=t: f.write_text(new,encoding='utf-8'); \
-                if m: \
-                  day=dt.date.fromisoformat(m.group(1)); noon=dt.datetime.combine(day,dt.time(12,0)); ts=noon.timestamp(); \
-                  os.utime(f,(ts,ts))"
+          python - <<'PY' > _range.env
+import os, datetime as dt
+try:
+    from zoneinfo import ZoneInfo
+    z = ZoneInfo(os.environ.get("TZ","UTC"))
+except Exception:
+    z = None
 
-      - name: Compute last full calendar week (Mon..Sun)
+today = dt.datetime.now(tz=z).date() if z else dt.datetime.utcnow().date()
+# Monday=0 .. Sunday=6 for the CURRENT week
+current_monday = today - dt.timedelta(days=today.weekday())
+# Last week's Monday/Sunday
+last_monday = current_monday - dt.timedelta(days=7)
+last_sunday  = last_monday + dt.timedelta(days=6)
+
+print(f"FROM={last_monday}")
+print(f"TO={last_sunday}")
+PY
+          cat _range.env | tee -a "$GITHUB_ENV"
+          echo "Range: $(cat _range.env)"
+
+      - name: Normalize & retime logs (markdown + mtime from filename)
         shell: bash
         run: |
           set -euo pipefail
-          python -c "from datetime import date,timedelta; \
-            today=date.today(); \
-            # Monday of this week, then step back 7 days to get the previous week
-            this_mon = today - timedelta(days=today.weekday()); \
-            last_mon = this_mon - timedelta(days=7); \
-            last_sun = last_mon + timedelta(days=6); \
-            print('FROM='+last_mon.isoformat()); print('TO='+last_sun.isoformat())" >> "$GITHUB_ENV"
-          echo "Range: $FROM → $TO"
+          python - <<'PY'
+import os, re, io, datetime as dt, pathlib as p
+
+root = p.Path(os.environ["INPUT_DIR"])
+pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+sect = {"summary","decisions","actions","risks","dependencies","notes"}
+
+def normalize(txt: str) -> str:
+    txt = txt.replace("\r\n", "\n").replace("•\t", "- ").replace("• ", "- ")
+    txt = re.sub(r"\\#", "#", txt)
+    txt = re.sub(r"\\\[(?=[^\]]+\])", "[", txt)
+    out = []
+    for line in txt.splitlines():
+        s = line.strip().lower()
+        if s in sect and not line.lstrip().startswith("#"):
+            out.append("## " + line.strip())
+        else:
+            out.append(line)
+    return "\n".join(out).strip() + "\n"
+
+if root.exists():
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        m = pat.match(f.name)
+        try:
+            t = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            t = io.open(f, "r", encoding="utf-8", errors="replace").read()
+        new = normalize(t)
+        if new != t:
+            f.write_text(new, encoding="utf-8")
+        if m:
+            day = dt.date.fromisoformat(m.group(1))
+            noon = dt.datetime.combine(day, dt.time(12, 0))
+            ts = noon.timestamp()
+            os.utime(f, (ts, ts))
+print("Normalization complete.")
+PY
 
       - name: List candidate files (diagnostics)
         shell: bash
         run: |
           set -euo pipefail
-          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
-          echo
-          echo "Files matching notes-YYYY-MM-DD.* within $FROM..$TO:"
-          python -c "import os,re,datetime as dt,pathlib as p; \
-            d=p.Path(os.environ['INPUT_DIR']); frm=dt.date.fromisoformat(os.environ['FROM']); to=dt.date.fromisoformat(os.environ['TO']); \
-            pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$',re.I); ms=[]; \
-            (d.exists() and d.is_dir()) and [ms.append(f.name) for f in sorted(d.iterdir()) \
-              if pat.match(f.name) and frm<=dt.date.fromisoformat(pat.match(f.name).group(1))<=to]; \
-            print('MATCHES:', ', '.join(ms) if ms else '(none)')"
+          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true; echo
+          echo "Files matching notes-YYYY-MM-DD.* in $FROM..$TO:"
+          python - <<'PY'
+import os, re, datetime as dt, pathlib as p
+d = p.Path(os.environ["INPUT_DIR"])
+frm = dt.date.fromisoformat(os.environ["FROM"])
+to  = dt.date.fromisoformat(os.environ["TO"])
+pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+matches = []
+if d.is_dir():
+    for f in sorted(d.iterdir()):
+        m = pat.match(f.name)
+        if not m: continue
+        day = dt.date.fromisoformat(m.group(1))
+        if frm <= day <= to:
+            matches.append(f.name)
+print("MATCHES:", ", ".join(matches) if matches else "(none)")
+PY
 
       - name: Generate weekly digest
         shell: bash
@@ -104,8 +150,8 @@ jobs:
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
-          echo '---- Preview (first 60 lines) ----'
-          head -n 60 outputs/weekly.md || true
+          echo '---- Preview (first 40 lines) ----'
+          head -n 40 outputs/weekly.md || true
 
       - name: Resolve Slack webhook (optional)
         shell: bash
