@@ -1,4 +1,4 @@
-name: Weekly Digest (schedule)
+name: Weekly Digest (last 7 days)
 
 on:
   schedule:
@@ -36,14 +36,48 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Generate weekly digest (Mon..Sun of this week)
+      - name: Compute rolling 7-day window
         run: |
           set -euo pipefail
-          FROM=$(date -u -d "monday this week" +%Y-%m-%d)
-          TO=$(date -u -d "sunday this week" +%Y-%m-%d)
+          FROM=$(date -u -d "7 days ago" +%Y-%m-%d)
+          TO=$(date -u +%Y-%m-%d)
+          echo "FROM=$FROM  TO=$TO"
+          echo "FROM=$FROM" >> "$GITHUB_ENV"
+          echo "TO=$TO" >> "$GITHUB_ENV"
+          # If you want a calendar week instead, replace above with:
+          # FROM=$(date -u -d "monday this week" +%Y-%m-%d)
+          # TO=$(date -u -d "sunday this week" +%Y-%m-%d)
+
+      - name: List candidate files in range (diagnostics)
+        run: |
+          set -euo pipefail
+          echo "All files in $INPUT_DIR:"
+          ls -la "$INPUT_DIR" || true
+          echo
+          echo "Files matching notes-YYYY-MM-DD.* within $FROM..$TO:"
+          python - <<'PY'
+import os, re, datetime, pathlib, sys
+p = pathlib.Path(os.environ["INPUT_DIR"])
+frm = datetime.date.fromisoformat(os.environ["FROM"])
+to  = datetime.date.fromisoformat(os.environ["TO"])
+pat = re.compile(r"notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+matches = []
+if p.is_dir():
+    for f in sorted(p.iterdir()):
+        m = pat.match(f.name)
+        if not m: 
+            continue
+        d = datetime.date.fromisoformat(m.group(1))
+        if frm <= d <= to:
+            matches.append(f.name)
+print("MATCHES:", ", ".join(matches) if matches else "(none)")
+PY
+
+      - name: Generate weekly digest
+        run: |
+          set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
-          echo "Range: $FROM → $TO"
           echo '---- Preview (first 40 lines) ----'
           head -n 40 outputs/weekly.md || true
 
