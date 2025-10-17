@@ -1,8 +1,9 @@
-name: Weekly Digest (last 7 days)
+name: Weekly Digest (last full week)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"     # Mondays at 08:00 (see TZ variable)
+    # Runs every Monday at 08:00 in your configured TZ (below)
+    - cron: "0 8 * * 1"
   workflow_dispatch: {}
 
 jobs:
@@ -20,12 +21,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install team-digest
+        shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (repo logs by default)
+        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
@@ -36,44 +39,44 @@ jobs:
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute rolling 7-day window
+      - name: Compute last full calendar week (Mon..Sun, UTC)
+        shell: bash
         run: |
           set -euo pipefail
-          FROM=$(date -u -d "7 days ago" +%Y-%m-%d)
-          TO=$(date -u +%Y-%m-%d)
+          FROM=$(date -u -d "monday last week" +%Y-%m-%d)
+          TO=$(date -u -d "sunday last week" +%Y-%m-%d)
           echo "FROM=$FROM  TO=$TO"
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
-          # If you want a calendar week instead, replace above with:
-          # FROM=$(date -u -d "monday this week" +%Y-%m-%d)
-          # TO=$(date -u -d "sunday this week" +%Y-%m-%d)
 
       - name: List candidate files in range (diagnostics)
+        shell: bash
         run: |
           set -euo pipefail
           echo "All files in $INPUT_DIR:"
           ls -la "$INPUT_DIR" || true
           echo
           echo "Files matching notes-YYYY-MM-DD.* within $FROM..$TO:"
-          python - <<'PY'
-import os, re, datetime, pathlib, sys
-p = pathlib.Path(os.environ["INPUT_DIR"])
-frm = datetime.date.fromisoformat(os.environ["FROM"])
-to  = datetime.date.fromisoformat(os.environ["TO"])
-pat = re.compile(r"notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
-matches = []
-if p.is_dir():
-    for f in sorted(p.iterdir()):
-        m = pat.match(f.name)
-        if not m: 
-            continue
-        d = datetime.date.fromisoformat(m.group(1))
-        if frm <= d <= to:
-            matches.append(f.name)
-print("MATCHES:", ", ".join(matches) if matches else "(none)")
-PY
+          python -c "import os, re, datetime as dt, pathlib as p; \
+d=p.Path(os.environ['INPUT_DIR']); \
+frm=dt.date.fromisoformat(os.environ['FROM']); \
+to=dt.date.fromisoformat(os.environ['TO']); \
+pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
+matches=[]; \
+printable='(dir missing)'; \
+if d.is_dir(): \
+    printable=''; \
+    for f in sorted(d.iterdir()): \
+        m=pat.match(f.name); \
+        if not m: \
+            continue; \
+        day=dt.date.fromisoformat(m.group(1)); \
+        if frm <= day <= to: \
+            matches.append(f.name); \
+print('MATCHES:', ', '.join(matches) if matches else '(none)')"
 
       - name: Generate weekly digest
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
@@ -82,6 +85,7 @@ PY
           head -n 40 outputs/weekly.md || true
 
       - name: Resolve Slack webhook (optional)
+        shell: bash
         run: |
           set -euo pipefail
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
@@ -94,6 +98,7 @@ PY
 
       - name: Post to Slack (if webhook is set)
         if: env.SLACK_WEBHOOK != ''
+        shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
