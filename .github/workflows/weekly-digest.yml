@@ -2,7 +2,7 @@ name: Weekly Digest (last full week)
 
 on:
   schedule:
-    # Runs every Monday at 08:00 in your configured TZ (below)
+    # Every Monday at 08:00 in your configured TZ (below)
     - cron: "0 8 * * 1"
   workflow_dispatch: {}
 
@@ -36,10 +36,14 @@ jobs:
           else
             INPUT_DIR="logs"
           fi
+          # Normalize to absolute if it exists under repo
+          if [ -d "$GITHUB_WORKSPACE/$INPUT_DIR" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$INPUT_DIR"
+          fi
           echo "Resolved INPUT_DIR=$INPUT_DIR"
           echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compute last full calendar week (Mon..Sun, UTC)
+      - name: Compute last full calendar week (Mon..Sun)
         shell: bash
         run: |
           set -euo pipefail
@@ -49,31 +53,15 @@ jobs:
           echo "FROM=$FROM" >> "$GITHUB_ENV"
           echo "TO=$TO" >> "$GITHUB_ENV"
 
-      - name: List candidate files in range (diagnostics)
+      - name: Quick diagnostics (non-blocking)
         shell: bash
         run: |
           set -euo pipefail
-          echo "All files in $INPUT_DIR:"
+          echo "All files in $INPUT_DIR (if any):"
           ls -la "$INPUT_DIR" || true
           echo
-          echo "Files matching notes-YYYY-MM-DD.* within $FROM..$TO:"
-          python -c "import os, re, datetime as dt, pathlib as p; \
-d=p.Path(os.environ['INPUT_DIR']); \
-frm=dt.date.fromisoformat(os.environ['FROM']); \
-to=dt.date.fromisoformat(os.environ['TO']); \
-pat=re.compile(r'^notes-(\\d{4}-\\d{2}-\\d{2})\\.(md|markdown|txt)$', re.I); \
-matches=[]; \
-printable='(dir missing)'; \
-if d.is_dir(): \
-    printable=''; \
-    for f in sorted(d.iterdir()): \
-        m=pat.match(f.name); \
-        if not m: \
-            continue; \
-        day=dt.date.fromisoformat(m.group(1)); \
-        if frm <= day <= to: \
-            matches.append(f.name); \
-print('MATCHES:', ', '.join(matches) if matches else '(none)')"
+          echo "Notes candidates (no date filtering here):"
+          find "$INPUT_DIR" -maxdepth 1 -type f \( -name 'notes-*.md' -o -name 'notes-*.markdown' -o -name 'notes-*.txt' \) -printf '%f\n' 2>/dev/null || true
 
       - name: Generate weekly digest
         shell: bash
