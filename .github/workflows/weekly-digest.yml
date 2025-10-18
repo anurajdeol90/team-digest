@@ -2,7 +2,7 @@ name: Weekly Digest (last full week)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"   # Mondays at 08:00 in your TZ (see env.TZ)
+    - cron: "0 8 * * 1"   # Mondays at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -59,6 +59,22 @@ jobs:
           echo "TO=$TO"     | tee -a "$GITHUB_ENV"
           echo "Window: $FROM .. $TO"
 
+      - name: Retimestamp logs based on filename date (12:00 local TZ)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Accept md/markdown/txt; only top-level of INPUT_DIR
+          for f in "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md \
+                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].markdown \
+                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].txt; do
+            base="$(basename "$f")"
+            day="${base#notes-}"; day="${day%%.*}"  # YYYY-MM-DD
+            # Set mtime to 12:00 that day, format for touch: YYYYMMDDhhmm
+            ts="$(date -d "$day 12:00" +%Y%m%d%H%M)"
+            touch -m -t "$ts" "$f"
+          done
+
       - name: Diagnostics — list candidate logs in range
         shell: bash
         run: |
@@ -67,18 +83,18 @@ jobs:
           echo "All files in $INPUT_DIR:"
           ls -la "$INPUT_DIR" || true
           echo
-          echo "Matching notes files in range:"
+          echo "Matching notes files in range (by filename date):"
           found=0
           if [ -d "$INPUT_DIR" ]; then
             while IFS= read -r -d '' f; do
               base="$(basename "$f")"
               d="${base#notes-}"; d="${d%%.*}"
-              # ISO dates compare lexicographically
               if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
                 echo "  - $base"
                 found=1
               fi
-            done < <(find "$INPUT_DIR" -maxdepth 1 -type f -regex '.*/notes-[0-9]{4}-[0-9]{2}-[0-9]{2}\.\(md\|markdown\|txt\)' -print0 | sort -z)
+            done < <(find "$INPUT_DIR" -maxdepth 1 -type f -regextype posix-extended \
+                     -regex '.*/notes-[0-9]{4}-[0-9]{2}-[0-9]{2}\.(md|markdown|txt)' -print0 | sort -z)
           fi
           if [ $found -eq 0 ]; then
             echo "(none in range)"
