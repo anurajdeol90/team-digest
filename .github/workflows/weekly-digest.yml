@@ -2,7 +2,7 @@ name: Weekly Digest (last full week)
 
 on:
   schedule:
-    - cron: "0 8 * * 1"   # Mondays at 08:00 (uses TZ below)
+    - cron: "0 8 * * 1"   # Mondays at 08:00 in your TZ (see env.TZ)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -49,14 +49,40 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute last full calendar week (Mon..Sun)
+      - name: Compute last full week (Mon..Sun)
         shell: bash
         run: |
           set -euo pipefail
-          FROM=$(date -d "last week monday" +%F)
-          TO=$(date -d "last week sunday" +%F)
+          FROM=$(date +%F -d "monday last week")
+          TO=$(date +%F -d "sunday last week")
           echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
           echo "TO=$TO"     | tee -a "$GITHUB_ENV"
+          echo "Window: $FROM .. $TO"
+
+      - name: Diagnostics — list candidate logs in range
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "INPUT_DIR=$INPUT_DIR"
+          echo "All files in $INPUT_DIR:"
+          ls -la "$INPUT_DIR" || true
+          echo
+          echo "Matching notes files in range:"
+          found=0
+          if [ -d "$INPUT_DIR" ]; then
+            while IFS= read -r -d '' f; do
+              base="$(basename "$f")"
+              d="${base#notes-}"; d="${d%%.*}"
+              # ISO dates compare lexicographically
+              if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
+                echo "  - $base"
+                found=1
+              fi
+            done < <(find "$INPUT_DIR" -maxdepth 1 -type f -regex '.*/notes-[0-9]{4}-[0-9]{2}-[0-9]{2}\.\(md\|markdown\|txt\)' -print0 | sort -z)
+          fi
+          if [ $found -eq 0 ]; then
+            echo "(none in range)"
+          fi
 
       - name: Generate weekly digest
         shell: bash
@@ -64,8 +90,8 @@ jobs:
           set -euo pipefail
           mkdir -p outputs
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
-          echo '---- Preview (first 40 lines) ----'
-          head -n 40 outputs/weekly.md || true
+          echo '---- Preview (first 60 lines) ----'
+          head -n 60 outputs/weekly.md || true
 
       - name: Resolve Slack webhook (optional)
         shell: bash
