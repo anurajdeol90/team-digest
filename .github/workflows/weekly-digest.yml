@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       input_dir:
-        description: "Override INPUT_DIR (repo-relative or absolute; e.g. logs or $GITHUB_WORKSPACE/logs)"
+        description: "Override INPUT_DIR (repo-relative or absolute; e.g. logs)"
         required: false
         type: string
       week_scope:
@@ -37,8 +37,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      # ---------- Resolve INPUT_DIR (handles $GITHUB_WORKSPACE and relative paths) ----------
-      - name: Resolve INPUT_DIR (override → repo var → logs/)
+      # ---------- Resolve INPUT_DIR (override → repo var → logs/) ----------
+      - name: Resolve INPUT_DIR
         id: resolve
         shell: bash
         run: |
@@ -49,19 +49,181 @@ jobs:
           fi
           [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
 
-          # Expand literal "$GITHUB_WORKSPACE/..." from the input if present
-          case "$CANDIDATE" in
-            '$GITHUB_WORKSPACE'/*)
-              CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}"
-              ;;
-          esac
-
-          # If still relative, make absolute from repo root
-          if [[ "$CANDIDATE" != /* ]]; then
-            CANDIDATE="${GITHUB_WORKSPACE%/}/$CANDIDATE"
+          # If absolute and exists, use as-is; otherwise treat as repo-relative
+          if [ -d "$CANDIDATE" ]; then
+            INPUT_DIR="$CANDIDATE"
+          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
+          else
+            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
           fi
 
-          echo "Resolved INPUT_DIR=$CANDIDATE"
-          printf 'INPUT_DIR=%s\n' "$CANDIDATE" >> "$GITHUB_ENV"
+          echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      #
+      # ---------- Week window (Mon..Sun) ----------
+      - name: Compute week window (Mon..Sun)
+        shell: bash
+        env:
+          WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'last' }}
+        run: |
+          set -euo pipefail
+          scope="${WEEK_SCOPE:-last}"
+          scope="${scope,,}"
+          if [[ "$scope" == this* ]]; then
+            MON=$(date +%F -d "monday this week")
+          else
+            MON=$(date +%F -d "monday last week")
+          fi
+          SUN=$(date +%F -d "$MON +6 days")
+          echo "FROM=$MON" | tee -a "$GITHUB_ENV"
+          echo "TO=$SUN"   | tee -a "$GITHUB_ENV"
+          echo "Window: $MON .. $SUN"
+
+      # ---------- Diagnostics (what is actually present) ----------
+      - name: Diagnostics — repo & logs presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "pwd = $(pwd)"
+          echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
+          echo
+          echo "Repo dirs (depth 2):"
+          find . -maxdepth 2 -type d -print | sort
+          echo
+          echo "Tracked files under logs/ (git):"
+          git ls-files logs || true
+          echo
+          echo "List INPUT_DIR content:"
+          if [ -d "$INPUT_DIR" ]; then
+            ls -la "$INPUT_DIR" || true
+          else
+            echo "(INPUT_DIR does not exist)"
+          fi
+
+      # ---------- Normalize notes; retime mtime by filename date ----------
+      - name: Normalize / retime logs (safe edits)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in "$INPUT_DIR"/notes-????-??-??.*; do
+            base="$(basename "$f")"
+            datepart="${base#notes-}"; datepart="${datepart%%.*}"
+            # Stamp mtime to noon UTC to avoid DST edges
+            touch -m -d "${datepart} 12:00:00" "$f" || true
+            # Normalize newlines/bullets/escapes/smart dashes
+            sed -i \
+              -e 's/\r$//' \
+              -e 's/•\t/- /g' \
+              -e 's/• /- /g' \
+              -e 's/\\#/#/g' \
+              -e 's/\\\[/[/' \
+              -e 's/\\-/-/g' \
+              -e 's/–/-/g' \
+              -e 's/—/-/g' \
+              "$f" || true
+          done
+
+      # ---------- Prove which files fall in the window (by filename date) ----------
+      - name: Diagnostics — match notes by filename date
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
+          root="${INPUT_DIR%/}"
+          found=()
+          shopt -s nullglob
+          for path in "$root"/notes-*; do
+            name="$(basename "$path")"
+            if [[ "$name" =~ ^notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
+              d="${BASH_REMATCH[1]}"
+              # ISO date strings compare lexicographically
+              if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
+                found+=("$name")
+              fi
+            fi
+          done
+          if ((${#found[@]})); then
+            IFS=$'\n' sorted=($(printf '%s\n' "${found[@]}" | sort)); unset IFS
+            echo "MATCHES: ${sorted[*]}"
+          else
+            echo "MATCHES: (none)"
+          fi
+
+      # ---------- Generate digest ----------
+      - name: Generate weekly digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs
+          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
+          echo '---- Preview (first 60 lines) ----'
+          head -n 60 outputs/weekly.md || true
+
+      # ---------- Priority-first sort of Actions (high -> medium -> low -> untagged) ----------
+      - name: Sort Actions by priority (high -> medium -> low -> untagged)
+        shell: bash
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+import re, io, sys
+p = "outputs/weekly.md"
+try:
+    t = io.open(p, "r", encoding="utf-8").read()
+except FileNotFoundError:
+    sys.exit(0)
+
+m_start = re.search(r'^##\s*Actions\s*$', t, re.M)
+if not m_start:
+    sys.exit(0)
+start = m_start.end()
+m_next  = re.search(r'^##\s+\S+', t[start:], re.M)
+end = start + (m_next.start() if m_next else len(t) - start)
+block = t[start:end]
+
+lines   = block.splitlines()
+bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
+others  = [ln for ln in lines if ln not in bullets]
+
+def prio_key(ln):
+    s = ln.lower()
+    if "[high]" in s:   return (0, s)
+    if "[medium]" in s: return (1, s)
+    if "[low]" in s:    return (2, s)
+    return (3, s)
+
+ordered = sorted(bullets, key=prio_key)
+joined = "\n".join(ordered + ([""] if ordered and (others and others[0].strip()) else []) + others)
+
+io.open(p, "w", encoding="utf-8").write(
+    t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
+)
+PY
+
+      # ---------- Slack (optional) ----------
+      - name: Resolve Slack webhook (optional)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
+          else
+            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Post to Slack (if webhook is set)
+        if: env.SLACK_WEBHOOK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+
+      # ---------- Artifact ----------
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-digest
+          path: outputs/**
