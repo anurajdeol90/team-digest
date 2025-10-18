@@ -1,8 +1,8 @@
-name: Monthly Digest (previous month)
+name: Monthly Digest
 
 on:
   schedule:
-    - cron: "0 8 1 * *"   # 1st at 08:00 (uses TZ below)
+    - cron: "0 8 1 * *"   # 1st day 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,6 +33,7 @@ jobs:
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
+        id: resolve
         shell: bash
         run: |
           set -euo pipefail
@@ -49,56 +51,44 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute previous calendar month
+      - name: Compute previous calendar month (UTC) with Python (short)
         shell: bash
         run: |
           set -euo pipefail
-          FIRST_THIS=$(date +%Y-%m-01)
-          LAST_PREV=$(date -d "$FIRST_THIS - 1 day" +%F)
-          FROM=$(date -d "$(date -d "$LAST_PREV" +%Y-%m)-01" +%F)
-          TO="$LAST_PREV"
-          echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
-          echo "TO=$TO"     | tee -a "$GITHUB_ENV"
-          echo "Window: $FROM .. $TO"
+          python -c "import datetime as dt;
+today=dt.date.today();
+first_this=dt.date(today.year,today.month,1);
+last_prev=first_this-dt.timedelta(days=1);
+from_=dt.date(last_prev.year,last_prev.month,1);
+to=last_prev;
+print('FROM='+str(from_)); print('TO='+str(to))" | tee -a "$GITHUB_ENV"
 
-      - name: Retimestamp logs based on filename date (12:00 local TZ)
+      - name: Retime logs mtime from filename date (notes-YYYY-MM-DD.*)
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          for f in "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md \
-                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].markdown \
-                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].txt; do
+          for f in "$INPUT_DIR"/notes-????-??-??.*; do
             base="$(basename "$f")"
-            day="${base#notes-}"; day="${day%%.*}"
-            ts="$(date -d "$day 12:00" +%Y%m%d%H%M)"
-            touch -m -t "$ts" "$f"
+            datepart="${base#notes-}"; datepart="${datepart%%.*}"
+            touch -m -d "${datepart} 12:00:00" "$f" || true
+            sed -i -e 's/\r$//' -e 's/•\t/- /g' -e 's/• /- /g' -e 's/\\#/#/g' -e 's/\\\[/[/' "$f" || true
           done
 
-      - name: Diagnostics — list candidate logs in range
+      - name: Diagnostics — list and match by filename date
         shell: bash
         run: |
           set -euo pipefail
           echo "INPUT_DIR=$INPUT_DIR"
-          echo "All files in $INPUT_DIR:"
-          ls -la "$INPUT_DIR" || true
+          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
           echo
-          echo "Matching notes files in range (by filename date):"
-          found=0
-          if [ -d "$INPUT_DIR" ]; then
-            while IFS= read -r -d '' f; do
-              base="$(basename "$f")"
-              d="${base#notes-}"; d="${d%%.*}"
-              if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
-                echo "  - $base"
-                found=1
-              fi
-            done < <(find "$INPUT_DIR" -maxdepth 1 -type f -regextype posix-extended \
-                     -regex '.*/notes-[0-9]{4}-[0-9]{2}-[0-9]{2}\.(md|markdown|txt)' -print0 | sort -z)
-          fi
-          if [ $found -eq 0 ]; then
-            echo "(none in range)"
-          fi
+          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
+          python -c "import os,re,datetime as dt,glob;
+frm=dt.date.fromisoformat(os.environ['FROM']); to=dt.date.fromisoformat(os.environ['TO']);
+pat=re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$',re.I);
+names=[os.path.basename(p) for p in glob.glob(os.environ['INPUT_DIR'].rstrip('/')+'/notes-*')];
+hits=[n for n in sorted(names) if pat.match(n) and frm<=dt.date.fromisoformat(pat.match(n).group(1))<=to];
+print('MATCHES:', ', '.join(hits) if hits else '(none)')"
 
       - name: Generate monthly digest
         shell: bash
