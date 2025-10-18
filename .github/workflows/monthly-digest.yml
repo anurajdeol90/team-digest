@@ -2,17 +2,12 @@ name: Monthly Digest
 
 on:
   schedule:
-    - cron: "0 8 1 * *"   # 1st of month at 08:00 (uses TZ below)
+    - cron: "0 8 1 * *"  # 1st day 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
-        type: string
-      month_scope:
-        description: "'prev' (previous calendar month) or 'this' (current month-to-date)"
-        required: false
-        default: "prev"
         type: string
 
 jobs:
@@ -38,77 +33,71 @@ jobs:
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
+        id: resolve
         shell: bash
         run: |
           set -euo pipefail
           CANDIDATE="${{ github.event.inputs.input_dir }}"
-          if [ -z "$CANDIDATE" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
+          if [ -z "${CANDIDATE}" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
-          [ -z "$CANDIDATE" ] && CANDIDATE="logs"
-          if [ -d "$CANDIDATE" ]; then
-            INPUT_DIR="$CANDIDATE"
-          elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
-            INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
-          else
-            INPUT_DIR="$CANDIDATE"
-          fi
-          echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
+          [ -z "${CANDIDATE}" ] && CANDIDATE="logs"
 
-      - name: Compute month window (calendar)
+          if [ -d "${CANDIDATE}" ]; then
+            INPUT_DIR="${CANDIDATE}"
+          elif [ -d "${GITHUB_WORKSPACE}/${CANDIDATE}" ]; then
+            INPUT_DIR="${GITHUB_WORKSPACE}/${CANDIDATE}"
+          else
+            INPUT_DIR="${CANDIDATE}"
+          fi
+
+          echo "INPUT_DIR=${INPUT_DIR}" | tee -a "${GITHUB_ENV}"
+
+      - name: Compute previous calendar month (UTC)
+        id: window
         shell: bash
         run: |
           set -euo pipefail
-          SCOPE="${{ github.event.inputs.month_scope }}"
-          if [ -z "$SCOPE" ]; then
-            if [ "${{ github.event_name }}" = "schedule" ]; then SCOPE="prev"; else SCOPE="prev"; fi
-          fi
-          # First day of THIS month:
-          FIRST_THIS=$(date +%Y-%m-01)
-          if [ "$SCOPE" = "this" ]; then
-            FROM="$FIRST_THIS"
-            TO=$(date +%F)   # up to today (month-to-date)
-          else
-            LAST_PREV=$(date -d "$FIRST_THIS - 1 day" +%Y-%m-%d)
-            FROM="$(date -d "$(date -d "$LAST_PREV" +%Y-%m)-01" +%Y-%m-%d)"
-            TO="$LAST_PREV"
-          fi
-          echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
-          echo "TO=$TO"     | tee -a "$GITHUB_ENV"
-          echo "Window: $FROM .. $TO"
+          FIRST_THIS="$(date +%Y-%m-01)"
+          LAST_PREV="$(date +%F -d "${FIRST_THIS} - 1 day")"
+          FROM="$(date +%Y-%m-01 -d "${LAST_PREV}")"
+          TO="${LAST_PREV}"
 
-      - name: Diagnostics — list files and filename matches
+          echo "FROM=${FROM}" | tee -a "${GITHUB_ENV}"
+          echo "TO=${TO}"     | tee -a "${GITHUB_ENV}"
+          echo "Window: ${FROM} .. ${TO}"
+
+      - name: Diagnostics — list and match notes by filename date
         shell: bash
         run: |
           set -euo pipefail
-          echo "INPUT_DIR=$INPUT_DIR"
-          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
+          echo "INPUT_DIR=${INPUT_DIR}"
+          echo "All files in ${INPUT_DIR}:"
+          ls -la "${INPUT_DIR}" || true
           echo
-          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
-          python - <<'PY'
-import os, re, datetime as dt, glob
-inp = os.environ["INPUT_DIR"]
-frm = dt.date.fromisoformat(os.environ["FROM"])
-to  = dt.date.fromisoformat(os.environ["TO"])
-pat = re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$', re.I)
-hits = []
-for p in glob.glob(os.path.join(inp, 'notes-*')):
-    n = os.path.basename(p)
-    m = pat.match(n)
-    if not m: 
-        continue
-    d = dt.date.fromisoformat(m.group(1))
-    if frm <= d <= to:
-        hits.append(n)
-print("MATCHES:", ", ".join(sorted(hits)) if hits else "(none)")
-PY
+
+          echo "Matching notes-YYYY-MM-DD.* within ${FROM}..${TO} (by filename date):"
+          shopt -s nullglob
+          hits=()
+          for f in "${INPUT_DIR}"/notes-????-??-??.*; do
+            base="$(basename "$f")"
+            day="${base#notes-}"; day="${day%%.*}"
+            if [[ "${day}" >="${FROM}" && "${day}" <= "${TO}" ]]; then
+              hits+=("${base}")
+            fi
+          done
+          if [ "${#hits[@]}" -gt 0 ]; then
+            printf 'MATCHES: %s\n' "$(IFS=', '; echo "${hits[*]}")"
+          else
+            echo "MATCHES: (none)"
+          fi
 
       - name: Generate monthly digest
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/monthly.md
+          team-digest --input "${INPUT_DIR}" --from "${FROM}" --to "${TO}" --format md -o outputs/monthly.md
           echo '---- Preview (first 60 lines) ----'
           head -n 60 outputs/monthly.md || true
 
@@ -117,11 +106,11 @@ PY
         run: |
           set -euo pipefail
           if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "$GITHUB_ENV"
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "${GITHUB_ENV}"
           elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
-            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "$GITHUB_ENV"
+            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "${GITHUB_ENV}"
           else
-            echo "SLACK_WEBHOOK=" >> "$GITHUB_ENV"
+            echo "SLACK_WEBHOOK=" >> "${GITHUB_ENV}"
           fi
 
       - name: Post to Slack (if webhook is set)
@@ -129,8 +118,8 @@ PY
         shell: bash
         run: |
           set -euo pipefail
-          PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)
-          curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
+          PAYLOAD="$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)"
+          curl -fsSL -H 'Content-Type: application/json' --data-raw "${PAYLOAD}" "${SLACK_WEBHOOK}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
