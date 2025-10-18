@@ -10,7 +10,7 @@ on:
         required: false
         type: string
       week_scope:
-        description: "Which week to digest: this (Mon..Sun) or last (Mon..Sun)"
+        description: "Which week: this (Mon..Sun) or last (Mon..Sun)"
         required: false
         default: "this"
         type: choice
@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,10 +56,9 @@ jobs:
           else
             INPUT_DIR="${CANDIDATE}"
           fi
-
           echo "INPUT_DIR=${INPUT_DIR}" | tee -a "${GITHUB_ENV}"
 
-      - name: Compute week window (Mon..Sun) via GNU date
+      - name: Compute week window (Mon..Sun) — robust
         id: window
         shell: bash
         run: |
@@ -66,12 +66,19 @@ jobs:
           scope="${{ github.event.inputs.week_scope }}"
           [ -z "${scope}" ] && scope="this"
 
+          # ISO weekday: 1=Mon .. 7=Sun
+          w=$(date +%u)
+
+          # Offsets to get Monday/Sunday of *this* week
+          from_off=$(( w - 1 ))     # days ago to Monday
+          to_off=$(( 7 - w ))       # days forward to Sunday
+
+          FROM=$(date +%F -d "${from_off} days ago")
+          TO=$(date +%F -d "${to_off} days")
+
           if [ "${scope}" = "last" ]; then
-            FROM="$(date +%F -d 'monday last week')"
-            TO="$(date +%F -d 'sunday last week')"
-          else
-            FROM="$(date +%F -d 'monday this week')"
-            TO="$(date +%F -d 'sunday this week')"
+            FROM=$(date +%F -d "${FROM} -7 days")
+            TO=$(date +%F -d "${TO} -7 days")
           fi
 
           echo "FROM=${FROM}" | tee -a "${GITHUB_ENV}"
@@ -93,7 +100,7 @@ jobs:
           for f in "${INPUT_DIR}"/notes-????-??-??.*; do
             base="$(basename "$f")"
             day="${base#notes-}"; day="${day%%.*}"
-            if [[ "${day}" >="${FROM}" && "${day}" <= "${TO}" ]]; then
+            if [[ ( "${day}" > "${FROM}" || "${day}" == "${FROM}" ) && ( "${day}" < "${TO}" || "${day}" == "${TO}" ) ]]; then
               hits+=("${base}")
             fi
           done
