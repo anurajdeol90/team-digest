@@ -1,18 +1,33 @@
-# Auto-detect text files and normalize line endings
+# Auto-detect text files and normalize to LF in the repo
 * text=auto eol=lf
 
-# Treat Python scripts as text
+# Treat Python as text
 *.py text
 
-# Ensure YAML files use LF
-*.yml text eol=lf
+# Ensure YAML (including GitHub Actions) uses LF
+*.yml  text eol=lf
+*.yaml text eol=lf
+.github/workflows/*.yml  text eol=lf
+.github/workflows/*.yaml text eol=lf
 
-# Ensure Markdown files use LF
-*.md text eol=lf
+# Markdown/docs use LF
+*.md  text eol=lf
+docs/** text eol=lf
 
-# Binary files (don’t diff)
-*.png binary
-*.jpg binary
+# Shell/PowerShell scripts as text
+*.sh  text eol=lf
+*.ps1 text eol=lf
+*.bat text
+
+# Common config as text
+*.toml text eol=lf
+*.ini  text eol=lf
+*.cfg  text eol=lf
+
+# Don’t diff binaries
+*.png  binary
+*.jpg  binary
 *.jpeg binary
-*.gif binary
-*.pdf binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
