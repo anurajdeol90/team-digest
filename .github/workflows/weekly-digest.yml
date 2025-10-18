@@ -10,9 +10,9 @@ on:
         required: false
         type: string
       week_scope:
-        description: "this (current Mon..Sun) or last (previous Mon..Sun)"
+        description: "Week to summarize: 'this' (current Mon..Sun) or 'last' (previous Mon..Sun)"
         required: false
-        default: "this"
+        default: "last"
         type: string
 
 jobs:
@@ -56,64 +56,33 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute week window (Mon..Sun) safely
+      - name: Compute week window (Mon..Sun)
+        id: window
         shell: bash
         run: |
           set -euo pipefail
-          scope="${GITHUB_INPUT_WEEK_SCOPE:-this}"   # provided by workflow_dispatch
-          # Pass SCOPE to Python without embedding ${{ }} inside the Python string
-          SCOPE="$scope" python - <<'PY'
-import os, datetime as dt
-today = dt.date.today()
-# Monday of the current week
-mon = today - dt.timedelta(days=today.weekday())
-sun = mon + dt.timedelta(days=6)
-scope = os.environ.get('SCOPE','this').lower()
-if scope.startswith('last'):
-    mon = mon - dt.timedelta(days=7)
-    sun = mon + dt.timedelta(days=6)
-print(f"FROM={mon}")
-print(f"TO={sun}")
-PY
-          # Append to GITHUB_ENV
-          FROM=$(grep '^FROM=' <<< "$(tail -n 2 $GITHUB_STEP_SUMMARY 2>/dev/null || true)" | sed 's/.*FROM=//') || true
-          TO=$(grep   '^TO='   <<< "$(tail -n 2 $GITHUB_STEP_SUMMARY 2>/dev/null || true)" | sed 's/.*TO=//') || true
-          # Fallback if step summary not used by runner (ensure FROM/TO written)
-          if [ -z "${FROM:-}" ] || [ -z "${TO:-}" ]; then
-            # Re-run Python and capture stdout directly
-            eval "$(
-              SCOPE="$scope" python - <<'PY'
-import os, datetime as dt
-today = dt.date.today()
-mon = today - dt.timedelta(days=today.weekday())
-sun = mon + dt.timedelta(days=6)
-scope = os.environ.get('SCOPE','this').lower()
-if scope.startswith('last'):
-    mon = mon - dt.timedelta(days=7)
-    sun = mon + dt.timedelta(days=6)
-print(f"FROM={mon}")
-print(f"TO={sun}")
-PY
-            )"
+          # Scope: default to dispatch input; if empty, use "last" when scheduled and "this" for manual runs.
+          SCOPE="${{ github.event.inputs.week_scope }}"
+          if [ -z "$SCOPE" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then SCOPE="last"; else SCOPE="this"; fi
           fi
+          # Monday of "this week" in the configured TZ:
+          MON_THIS=$(date +%u);  # 1..7 (Mon..Sun)
+          # Get ISO date for today in TZ:
+          TODAY=$(date +%F)
+          # Compute Monday of this week:
+          MON_DATE=$(date -d "$TODAY - $((MON_THIS-1)) days" +%F)
+          if [ "$SCOPE" = "last" ]; then
+            FROM=$(date -d "$MON_DATE - 7 days" +%F)
+          else
+            FROM="$MON_DATE"
+          fi
+          TO=$(date -d "$FROM + 6 days" +%F)
           echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
           echo "TO=$TO"     | tee -a "$GITHUB_ENV"
           echo "Window: $FROM .. $TO"
 
-      - name: Retime logs mtime from filename date (notes-YYYY-MM-DD.*)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for f in "$INPUT_DIR"/notes-????-??-??.*; do
-            base="$(basename "$f")"
-            datepart="${base#notes-}"; datepart="${datepart%%.*}"
-            touch -m -d "${datepart} 12:00:00" "$f" || true
-            # Normalize a few common characters/escapes
-            sed -i -e 's/\r$//' -e 's/•\t/- /g' -e 's/• /- /g' -e 's/\\#/#/g' -e 's/\\\[/[/' "$f" || true
-          done
-
-      - name: Diagnostics — list and match by filename date
+      - name: Diagnostics — list files and filename matches
         shell: bash
         run: |
           set -euo pipefail
@@ -122,21 +91,21 @@ PY
           echo
           echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
           python - <<'PY'
-import os, re, glob, datetime as dt
-frm = dt.date.fromisoformat(os.environ['FROM'])
-to  = dt.date.fromisoformat(os.environ['TO'])
+import os, re, datetime as dt, glob
+inp = os.environ["INPUT_DIR"]
+frm = dt.date.fromisoformat(os.environ["FROM"])
+to  = dt.date.fromisoformat(os.environ["TO"])
 pat = re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$', re.I)
-root = os.environ['INPUT_DIR'].rstrip('/')
-names = [os.path.basename(p) for p in glob.glob(root + '/notes-*')]
 hits = []
-for n in sorted(names):
+for p in glob.glob(os.path.join(inp, 'notes-*')):
+    n = os.path.basename(p)
     m = pat.match(n)
     if not m: 
         continue
-    day = dt.date.fromisoformat(m.group(1))
-    if frm <= day <= to:
+    d = dt.date.fromisoformat(m.group(1))
+    if frm <= d <= to:
         hits.append(n)
-print("MATCHES:", ", ".join(hits) if hits else "(none)")
+print("MATCHES:", ", ".join(sorted(hits)) if hits else "(none)")
 PY
 
       - name: Generate weekly digest

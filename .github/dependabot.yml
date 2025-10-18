@@ -1,29 +1,27 @@
 ﻿version: 2
 updates:
-  # Keep GitHub Actions up to date (checkout, setup-python, etc.)
+  # Keep GitHub Actions up to date (workflows)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"        # daily | weekly | monthly
-      day: "monday"             # only when interval = weekly
-      time: "09:00"             # UTC
-    open-pull-requests-limit: 4
-    rebase-strategy: "auto"
-    labels: ["dependencies", "github-actions"]
-    # target-branch: "main"     # uncomment if your default branch isn't 'main'
-
-  # (Optional) Keep Python deps in pyproject/requirements updated
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
       interval: "weekly"
-      day: "monday"
-      time: "09:15"
+      day: "sunday"
+      time: "09:00"
+      timezone: "UTC"
     open-pull-requests-limit: 5
-    rebase-strategy: "auto"
-    labels: ["dependencies", "python"]
-    versioning-strategy: "increase-if-necessary"
-    # groups can reduce PR noise by batching minor/patch updates
-    groups:
-      minor-and-patch:
-        update-types: ["minor", "patch"]
+    rebase-strategy: auto
+    # Don’t let Dependabot edit or mis-parse your digest workflows
+    # (it can still bump action versions referenced in them)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Example: Python pip in the root (if/when you want it)
+  # - package-ecosystem: "pip"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "sunday"
+  #     time: "09:00"
+  #     timezone: "UTC"
+  #   open-pull-requests-limit: 5

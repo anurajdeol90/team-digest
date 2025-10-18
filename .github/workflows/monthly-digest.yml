@@ -2,12 +2,17 @@ name: Monthly Digest
 
 on:
   schedule:
-    - cron: "0 8 1 * *"   # 1st day 08:00 (uses TZ below)
+    - cron: "0 8 1 * *"   # 1st of month at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
+        type: string
+      month_scope:
+        description: "'prev' (previous calendar month) or 'this' (current month-to-date)"
+        required: false
+        default: "prev"
         type: string
 
 jobs:
@@ -33,7 +38,6 @@ jobs:
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
-        id: resolve
         shell: bash
         run: |
           set -euo pipefail
@@ -51,31 +55,29 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute previous calendar month (UTC) with Python (short)
+      - name: Compute month window (calendar)
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import datetime as dt;
-today=dt.date.today();
-first_this=dt.date(today.year,today.month,1);
-last_prev=first_this-dt.timedelta(days=1);
-from_=dt.date(last_prev.year,last_prev.month,1);
-to=last_prev;
-print('FROM='+str(from_)); print('TO='+str(to))" | tee -a "$GITHUB_ENV"
+          SCOPE="${{ github.event.inputs.month_scope }}"
+          if [ -z "$SCOPE" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then SCOPE="prev"; else SCOPE="prev"; fi
+          fi
+          # First day of THIS month:
+          FIRST_THIS=$(date +%Y-%m-01)
+          if [ "$SCOPE" = "this" ]; then
+            FROM="$FIRST_THIS"
+            TO=$(date +%F)   # up to today (month-to-date)
+          else
+            LAST_PREV=$(date -d "$FIRST_THIS - 1 day" +%Y-%m-%d)
+            FROM="$(date -d "$(date -d "$LAST_PREV" +%Y-%m)-01" +%Y-%m-%d)"
+            TO="$LAST_PREV"
+          fi
+          echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
+          echo "TO=$TO"     | tee -a "$GITHUB_ENV"
+          echo "Window: $FROM .. $TO"
 
-      - name: Retime logs mtime from filename date (notes-YYYY-MM-DD.*)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for f in "$INPUT_DIR"/notes-????-??-??.*; do
-            base="$(basename "$f")"
-            datepart="${base#notes-}"; datepart="${datepart%%.*}"
-            touch -m -d "${datepart} 12:00:00" "$f" || true
-            sed -i -e 's/\r$//' -e 's/•\t/- /g' -e 's/• /- /g' -e 's/\\#/#/g' -e 's/\\\[/[/' "$f" || true
-          done
-
-      - name: Diagnostics — list and match by filename date
+      - name: Diagnostics — list files and filename matches
         shell: bash
         run: |
           set -euo pipefail
@@ -83,12 +85,23 @@ print('FROM='+str(from_)); print('TO='+str(to))" | tee -a "$GITHUB_ENV"
           echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
           echo
           echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
-          python -c "import os,re,datetime as dt,glob;
-frm=dt.date.fromisoformat(os.environ['FROM']); to=dt.date.fromisoformat(os.environ['TO']);
-pat=re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$',re.I);
-names=[os.path.basename(p) for p in glob.glob(os.environ['INPUT_DIR'].rstrip('/')+'/notes-*')];
-hits=[n for n in sorted(names) if pat.match(n) and frm<=dt.date.fromisoformat(pat.match(n).group(1))<=to];
-print('MATCHES:', ', '.join(hits) if hits else '(none)')"
+          python - <<'PY'
+import os, re, datetime as dt, glob
+inp = os.environ["INPUT_DIR"]
+frm = dt.date.fromisoformat(os.environ["FROM"])
+to  = dt.date.fromisoformat(os.environ["TO"])
+pat = re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$', re.I)
+hits = []
+for p in glob.glob(os.path.join(inp, 'notes-*')):
+    n = os.path.basename(p)
+    m = pat.match(n)
+    if not m: 
+        continue
+    d = dt.date.fromisoformat(m.group(1))
+    if frm <= d <= to:
+        hits.append(n)
+print("MATCHES:", ", ".join(sorted(hits)) if hits else "(none)")
+PY
 
       - name: Generate monthly digest
         shell: bash
