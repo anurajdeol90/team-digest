@@ -56,17 +56,49 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute week window (Mon..Sun) with Python (short)
+      - name: Compute week window (Mon..Sun) safely
         shell: bash
         run: |
           set -euo pipefail
-          python -c "import os,datetime as dt;
-today=dt.date.today();
-mon=today-dt.timedelta(days=today.weekday());
-sun=mon+dt.timedelta(days=6);
-scope=(os.environ.get('GITHUB_INPUT_WEEK_SCOPE') or '${{ github.event.inputs.week_scope }}' or 'this').lower();
-if scope.startswith('last'): mon=mon-dt.timedelta(days=7); sun=mon+dt.timedelta(days=6);
-print('FROM='+str(mon)); print('TO='+str(sun))" | tee -a "$GITHUB_ENV"
+          scope="${GITHUB_INPUT_WEEK_SCOPE:-this}"   # provided by workflow_dispatch
+          # Pass SCOPE to Python without embedding ${{ }} inside the Python string
+          SCOPE="$scope" python - <<'PY'
+import os, datetime as dt
+today = dt.date.today()
+# Monday of the current week
+mon = today - dt.timedelta(days=today.weekday())
+sun = mon + dt.timedelta(days=6)
+scope = os.environ.get('SCOPE','this').lower()
+if scope.startswith('last'):
+    mon = mon - dt.timedelta(days=7)
+    sun = mon + dt.timedelta(days=6)
+print(f"FROM={mon}")
+print(f"TO={sun}")
+PY
+          # Append to GITHUB_ENV
+          FROM=$(grep '^FROM=' <<< "$(tail -n 2 $GITHUB_STEP_SUMMARY 2>/dev/null || true)" | sed 's/.*FROM=//') || true
+          TO=$(grep   '^TO='   <<< "$(tail -n 2 $GITHUB_STEP_SUMMARY 2>/dev/null || true)" | sed 's/.*TO=//') || true
+          # Fallback if step summary not used by runner (ensure FROM/TO written)
+          if [ -z "${FROM:-}" ] || [ -z "${TO:-}" ]; then
+            # Re-run Python and capture stdout directly
+            eval "$(
+              SCOPE="$scope" python - <<'PY'
+import os, datetime as dt
+today = dt.date.today()
+mon = today - dt.timedelta(days=today.weekday())
+sun = mon + dt.timedelta(days=6)
+scope = os.environ.get('SCOPE','this').lower()
+if scope.startswith('last'):
+    mon = mon - dt.timedelta(days=7)
+    sun = mon + dt.timedelta(days=6)
+print(f"FROM={mon}")
+print(f"TO={sun}")
+PY
+            )"
+          fi
+          echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
+          echo "TO=$TO"     | tee -a "$GITHUB_ENV"
+          echo "Window: $FROM .. $TO"
 
       - name: Retime logs mtime from filename date (notes-YYYY-MM-DD.*)
         shell: bash
@@ -76,9 +108,8 @@ print('FROM='+str(mon)); print('TO='+str(sun))" | tee -a "$GITHUB_ENV"
           for f in "$INPUT_DIR"/notes-????-??-??.*; do
             base="$(basename "$f")"
             datepart="${base#notes-}"; datepart="${datepart%%.*}"
-            # 12:00 UTC to avoid DST edges
             touch -m -d "${datepart} 12:00:00" "$f" || true
-            # light normalization for common characters
+            # Normalize a few common characters/escapes
             sed -i -e 's/\r$//' -e 's/•\t/- /g' -e 's/• /- /g' -e 's/\\#/#/g' -e 's/\\\[/[/' "$f" || true
           done
 
@@ -90,12 +121,23 @@ print('FROM='+str(mon)); print('TO='+str(sun))" | tee -a "$GITHUB_ENV"
           echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
           echo
           echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
-          python -c "import os,re,datetime as dt,glob;
-frm=dt.date.fromisoformat(os.environ['FROM']); to=dt.date.fromisoformat(os.environ['TO']);
-pat=re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$',re.I);
-names=[os.path.basename(p) for p in glob.glob(os.environ['INPUT_DIR'].rstrip('/')+'/notes-*')];
-hits=[n for n in sorted(names) if pat.match(n) and frm<=dt.date.fromisoformat(pat.match(n).group(1))<=to];
-print('MATCHES:', ', '.join(hits) if hits else '(none)')"
+          python - <<'PY'
+import os, re, glob, datetime as dt
+frm = dt.date.fromisoformat(os.environ['FROM'])
+to  = dt.date.fromisoformat(os.environ['TO'])
+pat = re.compile(r'^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$', re.I)
+root = os.environ['INPUT_DIR'].rstrip('/')
+names = [os.path.basename(p) for p in glob.glob(root + '/notes-*')]
+hits = []
+for n in sorted(names):
+    m = pat.match(n)
+    if not m: 
+        continue
+    day = dt.date.fromisoformat(m.group(1))
+    if frm <= day <= to:
+        hits.append(n)
+print("MATCHES:", ", ".join(hits) if hits else "(none)")
+PY
 
       - name: Generate weekly digest
         shell: bash
