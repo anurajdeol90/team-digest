@@ -1,20 +1,29 @@
-name: Weekly Digest (last full week)
+name: Weekly Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1"   # Mondays at 08:00 (uses TZ below)
+    - cron: "0 8 * * 1"   # Mondays 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
         description: "Override INPUT_DIR (repo-relative or absolute)"
         required: false
         type: string
+      week_scope:
+        description: "Which week to summarize"
+        required: false
+        default: "this"
+        type: choice
+        options:
+          - this
+          - last-full
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}      # your preferred timezone
+      WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'this' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,6 +41,7 @@ jobs:
           pip install "team-digest>=1.1.6,<2"
 
       - name: Resolve INPUT_DIR (override → repo var → logs/)
+        id: resolve
         shell: bash
         run: |
           set -euo pipefail
@@ -49,33 +59,34 @@ jobs:
           fi
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute last full week (Mon..Sun)
+      - name: Compute week window (Mon..Sun) in Python
         shell: bash
         run: |
           set -euo pipefail
-          FROM=$(date +%F -d "monday last week")
-          TO=$(date +%F -d "sunday last week")
-          echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
-          echo "TO=$TO"     | tee -a "$GITHUB_ENV"
-          echo "Window: $FROM .. $TO"
+          python - <<'PY'
+import os, datetime as dt
+scope = (os.environ.get("WEEK_SCOPE") or "this").lower()
+today = dt.date.today()
+monday_this = today - dt.timedelta(days=today.weekday())     # 0=Mon
+sunday_this = monday_this + dt.timedelta(days=6)
 
-      - name: Retimestamp logs based on filename date (12:00 local TZ)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          # Accept md/markdown/txt; only top-level of INPUT_DIR
-          for f in "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md \
-                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].markdown \
-                   "$INPUT_DIR"/notes-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].txt; do
-            base="$(basename "$f")"
-            day="${base#notes-}"; day="${day%%.*}"  # YYYY-MM-DD
-            # Set mtime to 12:00 that day, format for touch: YYYYMMDDhhmm
-            ts="$(date -d "$day 12:00" +%Y%m%d%H%M)"
-            touch -m -t "$ts" "$f"
-          done
+if scope == "last-full":
+    monday = monday_this - dt.timedelta(days=7)
+    sunday = monday + dt.timedelta(days=6)
+else:
+    monday = monday_this
+    sunday = sunday_this
 
-      - name: Diagnostics — list candidate logs in range
+print(f"FROM={monday}  TO={sunday}")
+print(f"Window (Mon..Sun): {monday} .. {sunday}")
+
+# Export to env
+with open(os.environ["GITHUB_ENV"], "a") as fh:
+    fh.write(f"FROM={monday}\n")
+    fh.write(f"TO={sunday}\n")
+PY
+
+      - name: Rock-solid diagnostics (list files & matches)
         shell: bash
         run: |
           set -euo pipefail
@@ -83,22 +94,24 @@ jobs:
           echo "All files in $INPUT_DIR:"
           ls -la "$INPUT_DIR" || true
           echo
-          echo "Matching notes files in range (by filename date):"
-          found=0
-          if [ -d "$INPUT_DIR" ]; then
-            while IFS= read -r -d '' f; do
-              base="$(basename "$f")"
-              d="${base#notes-}"; d="${d%%.*}"
-              if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
-                echo "  - $base"
-                found=1
-              fi
-            done < <(find "$INPUT_DIR" -maxdepth 1 -type f -regextype posix-extended \
-                     -regex '.*/notes-[0-9]{4}-[0-9]{2}-[0-9]{2}\.(md|markdown|txt)' -print0 | sort -z)
-          fi
-          if [ $found -eq 0 ]; then
-            echo "(none in range)"
-          fi
+          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
+          python - <<'PY'
+import os, re, datetime as dt, pathlib as p
+root = p.Path(os.environ["INPUT_DIR"])
+frm  = dt.date.fromisoformat(os.environ["FROM"])
+to   = dt.date.fromisoformat(os.environ["TO"])
+pat  = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+matches = []
+if root.is_dir():
+    for f in sorted(root.iterdir()):
+        m = pat.match(f.name)
+        if not m:
+            continue
+        d = dt.date.fromisoformat(m.group(1))
+        if frm <= d <= to:
+            matches.append(f.name)
+print("MATCHES:", ", ".join(matches) if matches else "(none)")
+PY
 
       - name: Generate weekly digest
         shell: bash
