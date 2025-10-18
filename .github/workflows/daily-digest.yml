@@ -54,10 +54,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FROM=$(date +%F)   # honors TZ
+          FROM=$(date +%F)   # honors TZ from env
           TO="$FROM"
           echo "FROM=$FROM" | tee -a "$GITHUB_ENV"
           echo "TO=$TO"     | tee -a "$GITHUB_ENV"
+
+      - name: Diagnostics — list candidate logs for today
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "INPUT_DIR=$INPUT_DIR"
+          echo "Listing $INPUT_DIR:"
+          ls -la "$INPUT_DIR" || true
+          echo "Matching notes files for $FROM:"
+          ls -1 "$INPUT_DIR"/notes-"$FROM".* 2>/dev/null || echo "(none)"
 
       - name: Generate daily digest
         shell: bash
@@ -73,10 +83,8 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          python -c "import re,io; p='outputs/daily.md'; \
-t=io.open(p,'r',encoding='utf-8').read(); \
-m=re.search(r'^(#\\s*Team\\s+Digest\\s*\\()(\\d{4}-\\d{2}-\\d{2})\\s*-\\s*\\2(\\))', t, re.M); \
-io.open(p,'w',encoding='utf-8').write(t.replace(m.group(0), m.group(1)+m.group(2)+m.group(3), 1)) if m else None" || true
+          # Works even if sed -i needs a suffix on macOS (GitHub runners are Linux)
+          sed -E -i '1,5{s/^(# *Team +Digest *\()([0-9]{4}-[0-9]{2}-[0-9]{2}) *- *\2(\))/\1\2\3/}' outputs/daily.md || true
 
       - name: Resolve Slack webhook (optional)
         shell: bash
