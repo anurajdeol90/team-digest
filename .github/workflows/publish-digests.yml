@@ -53,7 +53,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set timezone env
         run: echo "TZ=${{ inputs.tz || 'UTC' }}" >> $GITHUB_ENV
