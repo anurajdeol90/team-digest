@@ -14,16 +14,15 @@ on:
         required: false
         default: "this"
         type: choice
-        options:
-          - this
-          - last-full
+        options: [this, last-full]
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}      # your preferred timezone
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}            # your preferred timezone
       WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'this' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,23 +66,64 @@ jobs:
 import os, datetime as dt
 scope = (os.environ.get("WEEK_SCOPE") or "this").lower()
 today = dt.date.today()
-monday_this = today - dt.timedelta(days=today.weekday())     # 0=Mon
+monday_this = today - dt.timedelta(days=today.weekday())   # 0 = Monday
 sunday_this = monday_this + dt.timedelta(days=6)
-
 if scope == "last-full":
     monday = monday_this - dt.timedelta(days=7)
     sunday = monday + dt.timedelta(days=6)
 else:
     monday = monday_this
     sunday = sunday_this
-
 print(f"FROM={monday}  TO={sunday}")
 print(f"Window (Mon..Sun): {monday} .. {sunday}")
-
-# Export to env
 with open(os.environ["GITHUB_ENV"], "a") as fh:
     fh.write(f"FROM={monday}\n")
     fh.write(f"TO={sunday}\n")
+PY
+
+      - name: Normalize & retime logs (mtime ← filename date)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import os, re, io, datetime as dt, pathlib as p
+root = p.Path(os.environ["INPUT_DIR"])
+if not root.exists():
+    print(f"INPUT_DIR missing: {root}")
+    raise SystemExit(0)
+pat = re.compile(r"^notes-(\d{4}-\d{2}-\d{2})\.(md|markdown|txt)$", re.I)
+# simple Markdown cleanup -> keep bullets/headings sane
+def fix_text(t:str)->str:
+    t = t.replace("\r\n","\n").replace("•\t","- ").replace("• ","- ")
+    t = re.sub(r"\\#","#",t)
+    t = re.sub(r"\\\[","[",t)
+    # ensure bare section words are headings
+    sect = {"summary","decisions","actions","risks","dependencies","notes"}
+    out=[]
+    for line in t.splitlines():
+        s=line.strip().lower()
+        if s in sect and not line.lstrip().startswith("#"):
+            out.append("## "+line.strip())
+        else:
+            out.append(line)
+    return "\n".join(out).strip() + "\n"
+for f in root.rglob("*"):
+    if not f.is_file(): continue
+    m = pat.match(f.name)
+    try:
+        t = f.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        t = io.open(f, "r", encoding="utf-8", errors="replace").read()
+    new = fix_text(t)
+    if new != t:
+        f.write_text(new, encoding="utf-8")
+    # Set mtime from filename date so --from/--to matches correctly
+    if m:
+        day = dt.date.fromisoformat(m.group(1))
+        noon = dt.datetime.combine(day, dt.time(12,0))
+        ts = noon.timestamp()
+        os.utime(f, (ts, ts))
+print("Retiming complete.")
 PY
 
       - name: Rock-solid diagnostics (list files & matches)
@@ -105,8 +145,7 @@ matches = []
 if root.is_dir():
     for f in sorted(root.iterdir()):
         m = pat.match(f.name)
-        if not m:
-            continue
+        if not m: continue
         d = dt.date.fromisoformat(m.group(1))
         if frm <= d <= to:
             matches.append(f.name)
