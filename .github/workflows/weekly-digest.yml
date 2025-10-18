@@ -2,7 +2,7 @@ name: Weekly Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1"  # Mondays at 08:00 (uses TZ below)
+    - cron: "0 8 * * 1"  # Mondays at 08:00 in your configured TZ (see job env)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -18,8 +18,10 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # Put repo vars into env so we can reference them in Bash without ${{ }} inside [ ... ]
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}   # e.g. "America/Chicago" or "UTC"
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR || '' }}
 
     steps:
       - name: Checkout
@@ -43,29 +45,28 @@ jobs:
         run: |
           set -euo pipefail
           CANDIDATE="${{ github.event.inputs.input_dir }}"
-          if [ -z "${CANDIDATE:-}" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
+          if [ -z "${CANDIDATE:-}" ] && [ -n "${DIGEST_INPUT_DIR:-}" ]; then
+            CANDIDATE="${DIGEST_INPUT_DIR}"
           fi
           [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
-
           if [ -d "$CANDIDATE" ]; then
             INPUT_DIR="$CANDIDATE"
           elif [ -d "$GITHUB_WORKSPACE/$CANDIDATE" ]; then
             INPUT_DIR="$GITHUB_WORKSPACE/$CANDIDATE"
           else
+            # still set it; tool will error if it doesn't exist
             INPUT_DIR="$CANDIDATE"
           fi
-
           echo "INPUT_DIR=$INPUT_DIR" | tee -a "$GITHUB_ENV"
 
-      - name: Compute week window (Mon..Sun) — Bash only
+      - name: Compute week window (Mon..Sun) in Bash
         shell: bash
         env:
-          WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'last' }}
+          WEEK_SCOPE_IN: ${{ github.event.inputs.week_scope }}
         run: |
           set -euo pipefail
-          scope="${WEEK_SCOPE:-last}"
-          scope="${scope,,}"
+          scope="${WEEK_SCOPE_IN:-last}"
+          scope="${scope,,}"   # lower-case
           if [[ "$scope" == this* ]]; then
             MON=$(date +%F -d "monday this week")
           else
@@ -84,10 +85,8 @@ jobs:
           for f in "$INPUT_DIR"/notes-????-??-??.*; do
             base="$(basename "$f")"
             datepart="${base#notes-}"; datepart="${datepart%%.*}"
-
             # Stamp mtime to noon UTC to avoid DST edges
             touch -m -d "${datepart} 12:00:00" "$f" || true
-
             # Normalize newlines/bullets/escapes/smart dashes
             sed -i \
               -e 's/\r$//' \
@@ -114,10 +113,8 @@ jobs:
           shopt -s nullglob
           for path in "$root"/notes-*; do
             name="$(basename "$path")"
-            # Extract YYYY-MM-DD from filename (if present)
             if [[ "$name" =~ ^notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
               d="${BASH_REMATCH[1]}"
-              # string compare works for ISO dates
               if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
                 found+=("$name")
               fi
@@ -138,44 +135,6 @@ jobs:
           team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
           echo '---- Preview (first 60 lines) ----'
           head -n 60 outputs/weekly.md || true
-
-      # Optional: sort "Actions" by priority [high] → [medium] → [low]
-      - name: Sort “Actions” by priority (best effort)
-        shell: bash
-        continue-on-error: true
-        run: |
-          python <<'PY'
-import re, io, sys
-p = "outputs/weekly.md"
-try:
-  t = io.open(p, "r", encoding="utf-8").read()
-except FileNotFoundError:
-  sys.exit(0)
-
-sec = re.search(r'^##\s+Actions\s*$', t, re.M)
-if not sec:
-  sys.exit(0)
-start = sec.end()
-nxt = re.search(r'^##\s+\w+', t[start:], re.M)
-end = start + (nxt.start() if nxt else len(t)-start)
-block = t[start:end]
-
-lines = block.splitlines()
-bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
-others  = [ln for ln in lines if ln not in bullets]
-
-def prio_key(ln: str) -> int:
-  s = ln.lower()
-  if "[high]" in s: return 0
-  if "[medium]" in s: return 1
-  if "[low]" in s: return 2
-  return 3
-
-ordered = sorted(bullets, key=prio_key)
-joined = "\n".join(ordered + ([""] if ordered and (others and others[0].strip()) else []) + others)
-new = t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
-io.open(p, "w", encoding="utf-8").write(new)
-PY
 
       - name: Resolve Slack webhook (optional)
         shell: bash
