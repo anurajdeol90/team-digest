@@ -2,7 +2,7 @@ name: Weekly Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1"  # Mondays at 08:00 in your configured TZ (see job env)
+    - cron: "0 8 * * 1"  # Mondays at 08:00 in your configured TZ (see env below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -19,7 +19,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}                 # e.g. "America/Chicago" or "UTC"
       DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR || '' }}
 
     steps:
@@ -83,7 +83,9 @@ jobs:
           for f in "$INPUT_DIR"/notes-????-??-??.*; do
             base="$(basename "$f")"
             datepart="${base#notes-}"; datepart="${datepart%%.*}"
+            # stamp mtime to noon UTC (avoids DST edges)
             touch -m -d "${datepart} 12:00:00" "$f" || true
+            # normalize bullets/newlines/escapes/dashes
             sed -i \
               -e 's/\r$//' \
               -e 's/•\t/- /g' \
@@ -96,43 +98,52 @@ jobs:
               "$f" || true
           done
 
-      - name: Diagnostics — list and match by filename date
+      - name: Diagnostics — list all files
         shell: bash
         run: |
           set -euo pipefail
           echo "INPUT_DIR=$INPUT_DIR"
-          echo "All files in $INPUT_DIR:"; ls -la "$INPUT_DIR" || true
-          echo
-          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
+          echo "All files in $INPUT_DIR:"
+          ls -la "$INPUT_DIR" || true
+
+      - name: Select files by filename date into inputs_subset/
+        id: subset
+        shell: bash
+        run: |
+          set -euo pipefail
           root="${INPUT_DIR%/}"
-          found=()
+          mkdir -p inputs_subset
+          count=0
           shopt -s nullglob
           for path in "$root"/notes-*; do
             name="$(basename "$path")"
             if [[ "$name" =~ ^notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
               d="${BASH_REMATCH[1]}"
               if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
-                found+=("$name")
+                cp "$path" "inputs_subset/$name"
+                count=$((count+1))
               fi
             fi
           done
-          if ((${#found[@]})); then
-            IFS=$'\n' sorted=($(printf '%s\n' "${found[@]}" | sort)); unset IFS
-            echo "MATCHES: ${sorted[*]}"
-          else
-            echo "MATCHES: (none)"
-          fi
+          echo "SUBSET_COUNT=$count" | tee -a "$GITHUB_ENV"
+          echo "Selected $count files into inputs_subset/"
+          ls -la inputs_subset || true
 
       - name: Generate weekly digest
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p outputs
-          team-digest --input "$INPUT_DIR" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
+          INPUT_EFFECTIVE="$INPUT_DIR"
+          if [ "${SUBSET_COUNT:-0}" -gt 0 ]; then
+            INPUT_EFFECTIVE="inputs_subset"
+          fi
+          echo "Using INPUT: $INPUT_EFFECTIVE"
+          team-digest --input "$INPUT_EFFECTIVE" --from "$FROM" --to "$TO" --format md -o outputs/weekly.md
           echo '---- Preview (first 60 lines) ----'
           head -n 60 outputs/weekly.md || true
 
-      # Sort "Actions" by priority [high] → [medium] → [low] → (untagged), shell-only, no Python heredocs
+      # Optional: sort "Actions" by priority [high] → [medium] → [low] → (untagged)
       - name: Sort “Actions” by priority (high→medium→low→rest)
         shell: bash
         continue-on-error: true
@@ -140,34 +151,18 @@ jobs:
           set -euo pipefail
           f="outputs/weekly.md"
           [ -s "$f" ] || exit 0
-
-          # Split into pre / actions section / post using csplit (coreutils)
-          # x00 = pre (before Actions heading)
-          # x01 = from "## Actions" to EOF
+          # Split before/after Actions heading
           if ! csplit -s -f x "$f" '/^##[[:space:]]\+Actions[[:space:]]*$/'; then
-            # No Actions heading → nothing to reorder
             exit 0
           fi
-
-          # Now split x01 at the NEXT section header to isolate only the Actions block
-          # y00 = "## Actions" + its block
-          # y01 = remainder (post)
           csplit -s -f y x01 '/^##[[:space:]]\+[^ ]/1' || true
-
-          # If y01 wasn't created, then Actions was the last section; create empty post
           [ -f y01 ] || : > y01
-
-          # Extract the body (drop the first line = the "## Actions" heading)
           tail -n +2 y00 > actions.raw || : > actions.raw
-
-          # Pull bullets out by priority (case-insensitive), others (non-bullets) kept after bullets
           : > high.tmp; : > med.tmp; : > low.tmp; : > rest.tmp; : > other.tmp
-
-          # Separate bullets vs other lines in Actions block
           while IFS= read -r line; do
             if [[ "$line" =~ ^[[:space:]]*[-*][[:space:]]+ ]]; then
               lcl="${line,,}"
-              if [[ "$lcl" == *"[high]"* ]];   then echo "$line" >> high.tmp
+              if   [[ "$lcl" == *"[high]"* ]];   then echo "$line" >> high.tmp
               elif [[ "$lcl" == *"[medium]"* ]]; then echo "$line" >> med.tmp
               elif [[ "$lcl" == *"[low]"* ]];    then echo "$line" >> low.tmp
               else echo "$line" >> rest.tmp
@@ -176,27 +171,15 @@ jobs:
               echo "$line" >> other.tmp
             fi
           done < actions.raw
-
-          # Rebuild the Actions section: heading + sorted bullets + blank line (if needed) + other lines
           {
             echo "## Actions"
             cat high.tmp med.tmp low.tmp rest.tmp
-            # Add a single blank line if there are bullets and the next "other" line is not already blank
-            if [ -s high.tmp ] || [ -s med.tmp ] || [ -s low.tmp ] || [ -s rest.tmp ]; then
-              if [ -s other.tmp ]; then
-                first_nonblank=$(grep -n -m1 -v '^[[:space:]]*$' other.tmp | cut -d: -f1 || true)
-                if [ -n "$first_nonblank" ] && [ "$first_nonblank" -eq 1 ]; then
-                  echo
-                fi
-              fi
+            if [ -s other.tmp ] && { [ -s high.tmp ] || [ -s med.tmp ] || [ -s low.tmp ] || [ -s rest.tmp ]; }; then
+              echo
             fi
             cat other.tmp
           } > actions.sorted
-
-          # Stitch pre + new Actions + post back together
           cat x00 actions.sorted y01 > "$f"
-
-          # Cleanup temp files
           rm -f x00 x01 y00 y01 actions.raw high.tmp med.tmp low.tmp rest.tmp other.tmp actions.sorted
 
       - name: Resolve Slack webhook (optional)
