@@ -19,7 +19,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}  # e.g. America/Chicago or UTC
 
     steps:
       - name: Checkout
@@ -37,54 +37,45 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      # ---------- CRITICAL: resolve INPUT_DIR with expansion & absolute path ----------
+      # ---------- Resolve INPUT_DIR (no heredocs; parser-safe) ----------
       - name: Resolve INPUT_DIR (override → repo var → logs/)
         id: resolve
         shell: bash
+        env:
+          INPUT_DIR_OVERRIDE: ${{ github.event.inputs.input_dir }}
+          VARS_DIGEST_INPUT_DIR: ${{ vars.DIGEST_INPUT_DIR }}
         run: |
           set -euo pipefail
-
-          # 1) Gather candidate
-          CANDIDATE="${{ github.event.inputs.input_dir }}"
-          if [ -z "${CANDIDATE:-}" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
+          CANDIDATE="${INPUT_DIR_OVERRIDE:-}"
+          if [ -z "$CANDIDATE" ] && [ -n "${VARS_DIGEST_INPUT_DIR:-}" ]; then
+            CANDIDATE="${VARS_DIGEST_INPUT_DIR}"
           fi
-          [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
+          [ -z "$CANDIDATE" ] && CANDIDATE="logs"
 
-          # 2) Expand $GITHUB_WORKSPACE literally typed by a user (e.g. "$GITHUB_WORKSPACE/logs")
-          case "$CANDIDATE" in
-            '$GITHUB_WORKSPACE'/*)
-              CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}"
-              ;;
-          esac
+          # Expand literal $GITHUB_WORKSPACE prefix if the user typed it
+          if [[ "$CANDIDATE" == '$GITHUB_WORKSPACE'* ]]; then
+            CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}"
+          fi
 
-          # 3) If relative, treat it as repo-relative
+          # If relative, make it repo-absolute
           if [[ "$CANDIDATE" != /* ]]; then
-            CANDIDATE="${GITHUB_WORKSPACE%/}/$CANDIDATE"
+            CANDIDATE="${GITHUB_WORKSPACE%/}/${CANDIDATE#./}"
           fi
 
-          # 4) Canonicalize (best-effort; do not fail if it doesn't exist)
-          ABS="$(python - <<'PY'
-import os, sys, pathlib
-p = pathlib.Path(sys.argv[1])
-try:
-  print(p.resolve())
-except Exception:
-  print(p)  # fallback
-PY
-"$CANDIDATE")"
+          # Canonicalize with a one-liner (no heredoc)
+          INPUT_DIR="$(python -c "import os,sys; print(os.path.abspath(sys.argv[1]))" "$CANDIDATE")"
 
-          echo "Resolved INPUT_DIR=$ABS"
-          printf 'INPUT_DIR=%s\n' "$ABS" >> "$GITHUB_ENV"
+          echo "Resolved INPUT_DIR=$INPUT_DIR"
+          echo "INPUT_DIR=$INPUT_DIR" >> "$GITHUB_ENV"
 
       # ---------- Week window (Mon..Sun) ----------
       - name: Compute week window (Mon..Sun)
         shell: bash
         env:
-          WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'last' }}
+          WEEK_SCOPE_IN: ${{ github.event.inputs.week_scope }}
         run: |
           set -euo pipefail
-          scope="${WEEK_SCOPE:-last}"
+          scope="${WEEK_SCOPE_IN:-last}"
           scope="${scope,,}"
           if [[ "$scope" == this* ]]; then
             MON=$(date +%F -d "monday this week")
@@ -96,16 +87,13 @@ PY
           echo "TO=$SUN"   | tee -a "$GITHUB_ENV"
           echo "Window: $MON .. $SUN"
 
-      # ---------- Deep diagnostics so we can see what's actually checked out ----------
+      # ---------- Diagnostics (prove what the runner sees) ----------
       - name: Diagnostics — repo & logs presence
         shell: bash
         run: |
           set -euo pipefail
           echo "pwd=$(pwd)"
           echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-          echo
-          echo "Repo root (depth 2):"
-          find . -maxdepth 2 -type d -printf '%p\n' | sort
           echo
           echo "Tracked files under logs/ (git):"
           git ls-files logs || true
@@ -117,9 +105,8 @@ PY
             echo "(INPUT_DIR does not exist)"
           fi
 
-      # ---------- Normalize note files and retime mtime by filename date ----------
+      # ---------- Normalize & retime note files ----------
       - name: Normalize / retime logs (safe edits)
-        if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -142,12 +129,12 @@ PY
               "$f" || true
           done
 
-      # ---------- Filename-date matcher to prove which files fall in the Mon..Sun window ----------
+      # ---------- Match files by filename date within Mon..Sun ----------
       - name: Diagnostics — match notes by filename date
         shell: bash
         run: |
           set -euo pipefail
-          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO (by filename date):"
+          echo "Matching notes-YYYY-MM-DD.* within $FROM..$TO:"
           root="${INPUT_DIR%/}"
           found=()
           shopt -s nullglob
@@ -178,42 +165,30 @@ PY
           head -n 60 outputs/weekly.md || true
 
       # ---------- Optional: sort Actions by priority ----------
-      - name: Sort “Actions” by priority (best effort)
+      - name: Sort Actions by priority (best effort)
         shell: bash
         continue-on-error: true
         run: |
-          python <<'PY'
-import re, io, sys
-p = "outputs/weekly.md"
-try:
-  t = io.open(p, "r", encoding="utf-8").read()
-except FileNotFoundError:
-  sys.exit(0)
-
-sec = re.search(r'^##\s+Actions\s*$', t, re.M)
-if not sec:
-  sys.exit(0)
-start = sec.end()
-nxt = re.search(r'^##\s+\w+', t[start:], re.M)
-end = start + (nxt.start() if nxt else len(t)-start)
-block = t[start:end]
-
-lines = block.splitlines()
-bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
-others  = [ln for ln in lines if ln not in bullets]
-
-def prio_key(ln: str) -> int:
-  s = ln.lower()
-  if "[high]" in s: return 0
-  if "[medium]" in s: return 1
-  if "[low]" in s: return 2
-  return 3
-
-ordered = sorted(bullets, key=prio_key)
-joined = "\n".join(ordered + ([""] if ordered and (others and others[0].strip()) else []) + others)
-new = t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
-io.open(p, "w", encoding="utf-8").write(new)
-PY
+          python -c "import re,io,sys; p='outputs/weekly.md'; 
+t=io.open(p,'r',encoding='utf-8').read() if __import__('os').path.exists(p) else None
+import os
+if t:
+  m=re.search(r'^##\\s+Actions\\s*$', t, re.M)
+  if m:
+    start=m.end()
+    m2=re.search(r'^##\\s+\\w+', t[start:], re.M)
+    end=start+(m2.start() if m2 else len(t)-start)
+    block=t[start:end]
+    lines=block.splitlines()
+    bullets=[ln for ln in lines if re.match(r'^\\s*[-*]\\s+', ln)]
+    others=[ln for ln in lines if ln not in bullets]
+    def key(ln): 
+      s=ln.lower()
+      return 0 if '[high]' in s else (1 if '[medium]' in s else (2 if '[low]' in s else 3))
+    ordered=sorted(bullets,key=key)
+    joined='\\n'.join(ordered+([''] if ordered and (others and others[0].strip()) else [])+others)
+    new=t[:start]+'\\n'+joined.strip('\\n')+'\\n'+t[end:]
+    io.open(p,'w',encoding='utf-8').write(new)"
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
@@ -236,7 +211,6 @@ PY
           PAYLOAD=$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/weekly.md)
           curl -fsSL -H 'Content-Type: application/json' --data-raw "$PAYLOAD" "$SLACK_WEBHOOK"
 
-      # ---------- Artifact ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
