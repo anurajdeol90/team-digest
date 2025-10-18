@@ -165,7 +165,8 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          python - <<'PY'
+          set -euo pipefail
+          cat > _sort_actions.py <<'PY'
 import re, io, sys
 p = "outputs/weekly.md"
 try:
@@ -199,6 +200,7 @@ io.open(p, "w", encoding="utf-8").write(
     t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
 )
 PY
+          python _sort_actions.py || true
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
