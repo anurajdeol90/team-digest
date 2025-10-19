@@ -167,6 +167,9 @@ jobs:
         run: |
           set -euo pipefail
           python .github/scripts/sort_actions.py outputs/weekly.md || true
+          echo '---- Actions (post-sort, first ~40 lines) ----'
+          awk '/^##[[:space:]]*Actions[[:space:]]*$/,/^##[[:space:]]*[[:alnum:]]/{print}' outputs/weekly.md | head -n 40 || true
+
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
