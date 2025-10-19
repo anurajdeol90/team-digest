@@ -166,41 +166,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          cat > _sort_actions.py <<'PY'
-import re, io, sys
-p = "outputs/weekly.md"
-try:
-    t = io.open(p, "r", encoding="utf-8").read()
-except FileNotFoundError:
-    sys.exit(0)
-
-m_start = re.search(r'^##\s*Actions\s*$', t, re.M)
-if not m_start:
-    sys.exit(0)
-start = m_start.end()
-m_next  = re.search(r'^##\s+\S+', t[start:], re.M)
-end = start + (m_next.start() if m_next else len(t) - start)
-block = t[start:end]
-
-lines   = block.splitlines()
-bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
-others  = [ln for ln in lines if ln not in bullets]
-
-def prio_key(ln):
-    s = ln.lower()
-    if "[high]" in s:   return (0, s)
-    if "[medium]" in s: return (1, s)
-    if "[low]" in s:    return (2, s)
-    return (3, s)
-
-ordered = sorted(bullets, key=prio_key)
-joined = "\n".join(ordered + ([""] if ordered and (others and others[0].strip()) else []) + others)
-
-io.open(p, "w", encoding="utf-8").write(
-    t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
-)
-PY
-          python _sort_actions.py || true
+          python .github/scripts/sort_actions.py outputs/weekly.md || true
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
