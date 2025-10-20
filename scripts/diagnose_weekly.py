@@ -41,6 +41,17 @@ def main():
         for d, c in sorted(matches):
             print(f"  ✓ {d}  -> {c}")
         print(f"TOTAL MATCHES: {len(matches)}")
+
+        # Preview first 25 lines of the first match to inspect headings
+        first = sorted(matches)[0][1]
+        print("\nPreview of first matched file (first 25 lines):", first)
+        try:
+            with open(first, "r", encoding="utf-8") as fh:
+                for i, line in enumerate(fh):
+                    if i >= 25: break
+                    print(f"{i+1:02d}: {line.rstrip()}")
+        except Exception as e:
+            print("Could not preview:", e)
     else:
         print("  (none)")
 
