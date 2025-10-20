@@ -6,7 +6,7 @@ from pathlib import Path
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 PRIORITY_TAGS = {"high": 0, "medium": 1, "low": 2}
 
-# Wide bullet detection: -, *, +, numbered "1." or "1)", checkboxes, unicode bullets/dashes
+# Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
     r'^[\s\u00A0]*('
     r'(?:[-*+])|'              # -, *, +
@@ -17,14 +17,28 @@ BULLET_RE = re.compile(
     re.M
 )
 
-# Tolerant header finder (same idea as diagnostics)
+# Same as BULLET_RE but allows an optional leading backslash before the marker (to unescape)
+LEAD_TOKEN_RE = re.compile(
+    r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+'
+)
+
 HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
+
+MOJIBAKE_FIXES = {
+    "â€“": "–", "â€”": "—", "â€˜": "‘", "â€™": "’",
+    "â€œ": "“", "â€\x9d": "”", "â€¢": "•",
+}
+
+def fix_mojibake(s: str) -> str:
+    for k, v in MOJIBAKE_FIXES.items():
+        s = s.replace(k, v)
+    return s
 
 def parse_args():
     p = argparse.ArgumentParser(description="Aggregate logs into a digest.")
     p.add_argument("--logs-dir", default="logs")
-    p.add_argument("--start", required=True)   # YYYY-MM-DD
-    p.add_argument("--end", required=True)     # YYYY-MM-DD inclusive
+    p.add_argument("--start", required=True)
+    p.add_argument("--end", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--title", default="")
     p.add_argument("--expect-missing", dest="expect_missing", action="store_true")
@@ -32,16 +46,10 @@ def parse_args():
     return p.parse_args()
 
 def normalize_heading(raw: str) -> str:
-    # Take first word, strip common trailing punctuation/dashes (colon, em/en)
-    base = raw.strip().split()[0].rstrip(":-—–").lower()
-    return base
+    return raw.strip().split()[0].rstrip(":-—–").lower()
 
 def slice_sections(text: str) -> dict:
-    """
-    Find all ##..###### headings, normalize names, and slice the body between headings.
-    This mirrors the tolerant logic used in diagnostics.
-    """
-    text = text.replace("\r\n", "\n")
+    text = fix_mojibake(text.replace("\r\n", "\n"))
     sections = {}
     matches = list(HDR_LINE.finditer(text))
     if not matches:
@@ -72,7 +80,7 @@ def collect_bullets(block: str):
         s = ln.rstrip()
         if not s.strip():
             continue
-        if BULLET_RE.match(s):
+        if BULLET_RE.match(s) or LEAD_TOKEN_RE.match(s):
             out.append(s.strip())
     return out
 
@@ -81,6 +89,24 @@ def detect_priority(line: str):
         if re.search(rf"\[{tag}\]", line, re.I):
             return tag, rank
     return None, 999
+
+def clean_item_text(line: str) -> str:
+    # Remove any leading bullet/checkbox/number with optional backslash
+    s = LEAD_TOKEN_RE.sub("", line).strip()
+    # Final tiny cleanup: if someone double-escaped like "\\- ", collapse it
+    s = re.sub(r'^[\\]+', "", s).strip()
+    return s
+
+def normalize_block_text(block: str) -> str:
+    """Unescape leading '\-' '\*' etc in narrative sections and fix mojibake."""
+    if not block:
+        return ""
+    lines = []
+    for ln in fix_mojibake(block).splitlines():
+        # If a line starts with an escaped bullet, drop the backslash so it renders cleanly
+        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)
+        lines.append(ln)
+    return "\n".join(lines).strip()
 
 def main():
     a = parse_args()
@@ -98,18 +124,18 @@ def main():
             continue
         matched.append(p.as_posix())
         t = io.open(p, "r", encoding="utf-8").read()
-        secs = slice_sections(t)  # ← robust, diagnostics-aligned
+        secs = slice_sections(t)
 
-        # narrative sections
+        # narrative sections (normalize escaped bullets + mojibake)
         for k in ["Summary", "Decisions", "Risks", "Dependencies", "Notes"]:
             if secs.get(k):
-                acc[k].append(secs[k].strip())
+                acc[k].append(normalize_block_text(secs[k]))
 
         # actions
         actions_block = secs.get("Actions", "")
         bullets = collect_bullets(actions_block)
 
-        # Fallback: if no bullets but priority tags exist, treat each non-empty line as an item
+        # Fallback: if no bullets but priority tags exist, treat non-empty lines as items
         if not bullets and actions_block:
             lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
             if any(re.search(r"\[(?:high|medium|low)\]", L, re.I) for L in lines):
@@ -117,7 +143,7 @@ def main():
 
         for line in bullets:
             tag, rank = detect_priority(line)
-            action_items.append((rank, tag or "", line))
+            action_items.append((rank, tag or "", clean_item_text(line)))
 
     if not matched and not a.expect_missing:
         sys.stderr.write(f"[weekly] No log files matched {start}..{end} in {logs_dir}\n")
@@ -133,7 +159,7 @@ def main():
 
     def emit_block(name: str):
         out.append(f"## {name}")
-        items = acc[name]
+        items = [x for x in acc[name] if x]
         if items:
             for x in items:
                 out.append(x)
@@ -149,12 +175,11 @@ def main():
     if action_items:
         if a.group_actions:
             buckets = {"high": [], "medium": [], "low": [], "other": []}
-            for rank, tag, line in sorted(action_items, key=lambda t: (t[0], t[2])):
+            for rank, tag, text in sorted(action_items, key=lambda t: (t[0], t[2])):
                 key = (tag or "other").lower()
                 if key not in buckets:
                     key = "other"
-                clean = BULLET_RE.sub("", line).strip()
-                buckets[key].append(f"- {clean}")
+                buckets[key].append(f"- {text}")
             for head in ["high", "medium", "low", "other"]:
                 if not buckets[head]:
                     continue
@@ -163,9 +188,8 @@ def main():
                 out.extend(buckets[head])
                 out.append("")
         else:
-            for _, __, line in sorted(action_items, key=lambda t: (t[0], t[2])):
-                clean = BULLET_RE.sub("", line).strip()
-                out.append(f"- {clean}")
+            for _, __, text in sorted(action_items, key=lambda t: (t[0], t[2])):
+                out.append(f"- {text}")
             out.append("")
     else:
         out.append("_No actions._")
