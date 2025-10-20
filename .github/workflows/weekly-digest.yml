@@ -37,33 +37,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      # ---------- Resolve INPUT_DIR with expansion & absolute path ----------
+      # ---------- Resolve INPUT_DIR (override → repo var → logs/) ----------
       - name: Resolve INPUT_DIR (override → repo var → logs/)
         id: resolve
         shell: bash
         run: |
           set -euo pipefail
-          # 1) Gather candidate
           CANDIDATE="${{ github.event.inputs.input_dir }}"
           if [ -z "${CANDIDATE:-}" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
           [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
-          # 2) Expand a literal $GITHUB_WORKSPACE prefix if the user typed it
+
+          # Expand literal $GITHUB_WORKSPACE if user typed it
           case "$CANDIDATE" in
-            '$GITHUB_WORKSPACE'/*)
-              CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}"
-              ;;
+            '$GITHUB_WORKSPACE'/*) CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}";;
           esac
-          # 3) If still relative, make it repo-absolute
+
+          # Make relative paths repo-relative
           if [[ "$CANDIDATE" != /* ]]; then
             CANDIDATE="${GITHUB_WORKSPACE%/}/$CANDIDATE"
           fi
+
           echo "Resolved INPUT_DIR=$CANDIDATE"
           printf 'INPUT_DIR=%s\n' "$CANDIDATE" >> "$GITHUB_ENV"
 
       # ---------- Week window (Mon..Sun) ----------
-      - name: Compute week window (Mon..Sun)
+      - name: Compute week window (Mon..Sun) — Bash only
         shell: bash
         env:
           WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'last' }}
@@ -81,7 +81,7 @@ jobs:
           echo "TO=$SUN"   | tee -a "$GITHUB_ENV"
           echo "Window: $MON .. $SUN"
 
-      # ---------- Deep diagnostics so we can see what's actually checked out ----------
+      # ---------- Diagnostics so we can see what's actually checked out ----------
       - name: Diagnostics — repo & logs presence
         shell: bash
         run: |
@@ -139,6 +139,7 @@ jobs:
             name="$(basename "$path")"
             if [[ "$name" =~ ^notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
               d="${BASH_REMATCH[1]}"
+              # String compare works because dates are ISO-8601
               if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
                 found+=("$name")
               fi
@@ -161,13 +162,13 @@ jobs:
           echo '---- Preview (first 60 lines) ----'
           head -n 60 outputs/weekly.md || true
 
-      # ---------- Priority-first sort of Actions (high -> medium -> low -> untagged) ----------
-      - name: Sort Actions by priority (high -> medium -> low -> untagged)
+      # ---------- Priority-first sort of Actions (high → medium → low → untagged) ----------
+      - name: Sort Actions by priority (high → medium → low → untagged)
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          python <<'PY'
+          python - <<'PY'
 import re, io, sys, os
 
 p = "outputs/weekly.md"
@@ -181,37 +182,36 @@ m_start = re.search(r'^##\s*Actions\s*$', t, re.M)
 if not m_start:
     sys.exit(0)
 start = m_start.end()
-m_next  = re.search(r'^##\s+\S+', t[start:], re.M)
-end = start + (m_next.start() if m_next else len(t)-start)
-block = t[start:end]
 
-# Separate bullets from any other lines in the block
-lines   = block.splitlines()
+m_next = re.search(r'^##\s+\S+', t[start:], re.M)
+end = start + (m_next.start() if m_next else len(t) - start)
+
+block = t[start:end]
+lines = block.splitlines()
+
+# Keep only bullets as sortable; preserve any non-bullets after them
 bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
 others  = [ln for ln in lines if ln not in bullets]
 
-def prio_key(ln: str) -> int:
+def prio_key(ln: str):
     s = ln.lower()
-    if "[high]" in s:   return 0
-    if "[medium]" in s: return 1
-    if "[low]" in s:    return 2
-    return 3
+    if "[high]" in s: return (0, s)
+    if "[medium]" in s: return (1, s)
+    if "[low]" in s: return (2, s)
+    return (3, s)
 
 ordered = sorted(bullets, key=prio_key)
 
-new_block = "\n".join(ordered + ([""] if ordered and others and others[0].strip() else []) + others)
-new_text  = t[:start] + "\n" + new_block.strip("\n") + "\n" + t[end:]
-io.open(p, "w", encoding="utf-8").write(new_text)
+# Rebuild the Actions block
+joined = "\n".join(ordered)
+if ordered and others and others[0].strip():
+    joined += "\n\n" + "\n".join(others)
+elif others:
+    joined += "\n" + "\n".join(others)
 
-print("[sort_actions] high={}, medium={}, low={}, untagged={}".format(
-    sum(1 for ln in ordered if "[high]"   in ln.lower()),
-    sum(1 for ln in ordered if "[medium]" in ln.lower()),
-    sum(1 for ln in ordered if "[low]"    in ln.lower()),
-    sum(1 for ln in ordered if not any(k in ln.lower() for k in ("[high]","[medium]","[low]")))
-))
+new = t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
+io.open(p, "w", encoding="utf-8").write(new)
 PY
-          echo "---- Actions (post-sort, first ~40 lines) ----"
-          awk 'NR>300{exit} {print}' outputs/weekly.md || true
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
