@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       year:
-        description: "4-digit year (optional; default: previous month)"
+        description: "4-digit year (optional; overrides default)"
         required: false
         type: string
       month:
-        description: "1-12 (optional; default: previous month)"
+        description: "1-12 (optional; overrides default)"
         required: false
         type: string
+      latest_with_data:
+        description: "If true and no inputs, pick the latest month that has any logs"
+        required: false
+        type: boolean
       flat_by_name:
         description: "Sort Actions globally by name→priority (no priority buckets)"
         required: false
@@ -43,25 +47,51 @@ jobs:
       - name: Install deps
         run: python -m pip install --upgrade pip
 
-      - name: Resolve month range (inputs → previous calendar month)
+      - name: Resolve month range (inputs → latest_with_data → current MTD)
         id: range
         shell: bash
+        env:
+          LOGS_DIR: ${{ env.LOGS_DIR }}
         run: |
           set -euo pipefail
-          IN_Y="${{ inputs.year }}"
-          IN_M="${{ inputs.month }}"
+          IN_Y="${{ inputs.year || '' }}"
+          IN_M="${{ inputs.month || '' }}"
+          LATEST_WITH_DATA="${{ inputs.latest_with_data }}"
+
+          pick_month() {
+            local y="$1" m="$2"
+            local start end
+            start="$(date -u -d "${y}-${m}-01" +%Y-%m-%d)"
+            end="$(date -u -d "$start +1 month -1 day" +%Y-%m-%d)"
+            echo "$start|$end"
+          }
 
           if [ -n "$IN_Y" ] && [ -n "$IN_M" ]; then
-            # Use specified month
-            START="$(date -u -d "${IN_Y}-${IN_M}-01" +%Y-%m-%d)"
+            # Explicit month (full calendar)
+            SEL=$(pick_month "$IN_Y" "$IN_M")
+          elif [ "$LATEST_WITH_DATA" = "true" ]; then
+            # Find most recent month present in logs filenames
+            MONTHS=$(ls -1 "$LOGS_DIR"/notes-*.md 2>/devnull || true | sed -E 's~.*notes-([0-9]{4}-[0-9]{2})-[0-9]{2}\.md~\1~' | sort | uniq)
+            if [ -n "$MONTHS" ]; then
+              LM=$(echo "$MONTHS" | tail -n1)
+              Y=$(echo "$LM" | cut -d- -f1)
+              M=$(echo "$LM" | cut -d- -f2)
+              SEL=$(pick_month "$Y" "$M")
+            else
+              # Fall back to current month to date
+              START="$(date -u -d "$(date -u +%Y-%m-01)" +%Y-%m-%d)"
+              END="$(date -u +%Y-%m-%d)"
+              SEL="$START|$END"
+            fi
           else
-            # Previous calendar month from today
-            START="$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-%d)"
+            # Default: current month to date (MTD)
+            START="$(date -u -d "$(date -u +%Y-%m-01)" +%Y-%m-%d)"
+            END="$(date -u +%Y-%m-%d)"
+            SEL="$START|$END"
           fi
 
-          # END = last day of that month
-          END="$(date -u -d "$START +1 month -1 day" +%Y-%m-%d)"
-
+          START="${SEL%%|*}"
+          END="${SEL##*|}"
           echo "start=$START" >> "$GITHUB_OUTPUT"
           echo "end=$END"     >> "$GITHUB_OUTPUT"
           echo "Resolved month window (UTC): $START .. $END"
