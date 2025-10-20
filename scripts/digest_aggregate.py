@@ -4,7 +4,10 @@ import argparse, re, sys, io, os, datetime as dt
 from pathlib import Path
 
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
-PRIORITY_TAGS = {"high": 0, "medium": 1, "low": 2}
+
+# priority ranks: lower = higher priority
+PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}  # map pN -> label
 
 # Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
@@ -17,13 +20,15 @@ BULLET_RE = re.compile(
     re.M
 )
 
-# Same as BULLET_RE but allows an optional leading backslash before the marker (to unescape)
+# Same as BULLET_RE but allows an optional leading backslash (for escaped bullets in logs)
 LEAD_TOKEN_RE = re.compile(
     r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+'
 )
 
+# tolerant header locator
 HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
 
+# fix common mojibake from mis-decoding
 MOJIBAKE_FIXES = {
     "â€“": "–", "â€”": "—", "â€˜": "‘", "â€™": "’",
     "â€œ": "“", "â€\x9d": "”", "â€¢": "•",
@@ -37,8 +42,8 @@ def fix_mojibake(s: str) -> str:
 def parse_args():
     p = argparse.ArgumentParser(description="Aggregate logs into a digest.")
     p.add_argument("--logs-dir", default="logs")
-    p.add_argument("--start", required=True)
-    p.add_argument("--end", required=True)
+    p.add_argument("--start", required=True)   # YYYY-MM-DD
+    p.add_argument("--end", required=True)     # YYYY-MM-DD inclusive
     p.add_argument("--output", required=True)
     p.add_argument("--title", default="")
     p.add_argument("--expect-missing", dest="expect_missing", action="store_true")
@@ -85,15 +90,18 @@ def collect_bullets(block: str):
     return out
 
 def detect_priority(line: str):
-    for tag, rank in PRIORITY_TAGS.items():
-        if re.search(rf"\[{tag}\]", line, re.I):
-            return tag, rank
-    return None, 999
+    # return (label, rank). label is one of high/medium/low/other
+    m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
+    if m:
+        tag = m.group(1).lower()
+        label = P_EQUIV.get(tag, tag)  # map pN → high/medium/low
+        return label, PRIORITY_RANK.get(label, 3)
+    return "other", 3
 
 def clean_item_text(line: str) -> str:
-    # Remove any leading bullet/checkbox/number with optional backslash
+    # remove leading bullet-like token (with optional backslash)
     s = LEAD_TOKEN_RE.sub("", line).strip()
-    # Final tiny cleanup: if someone double-escaped like "\\- ", collapse it
+    # collapse duplicate escapes if any
     s = re.sub(r'^[\\]+', "", s).strip()
     return s
 
@@ -103,8 +111,7 @@ def normalize_block_text(block: str) -> str:
         return ""
     lines = []
     for ln in fix_mojibake(block).splitlines():
-        # If a line starts with an escaped bullet, drop the backslash so it renders cleanly
-        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)
+        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)  # drop leading backslash before a bullet
         lines.append(ln)
     return "\n".join(lines).strip()
 
@@ -114,8 +121,9 @@ def main():
     start = dt.date.fromisoformat(a.start)
     end   = dt.date.fromisoformat(a.end)
 
+    # accumulate content across days
     acc = {k: [] for k in SECTION_ORDER}
-    action_items = []
+    action_items = []  # list[(rank,label,text)]
     matched = []
 
     for d in daterange(start, end):
@@ -126,10 +134,12 @@ def main():
         t = io.open(p, "r", encoding="utf-8").read()
         secs = slice_sections(t)
 
-        # narrative sections (normalize escaped bullets + mojibake)
+        # narrative sections (normalize bullet escapes + mojibake)
         for k in ["Summary", "Decisions", "Risks", "Dependencies", "Notes"]:
             if secs.get(k):
-                acc[k].append(normalize_block_text(secs[k]))
+                txt = normalize_block_text(secs[k])
+                if txt:
+                    acc[k].append(txt)
 
         # actions
         actions_block = secs.get("Actions", "")
@@ -138,12 +148,12 @@ def main():
         # Fallback: if no bullets but priority tags exist, treat non-empty lines as items
         if not bullets and actions_block:
             lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
-            if any(re.search(r"\[(?:high|medium|low)\]", L, re.I) for L in lines):
+            if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
                 bullets = lines
 
         for line in bullets:
-            tag, rank = detect_priority(line)
-            action_items.append((rank, tag or "", clean_item_text(line)))
+            label, rank = detect_priority(line)
+            action_items.append((rank, label, clean_item_text(line)))
 
     if not matched and not a.expect_missing:
         sys.stderr.write(f"[weekly] No log files matched {start}..{end} in {logs_dir}\n")
@@ -158,42 +168,35 @@ def main():
     out.append("")
 
     def emit_block(name: str):
-        out.append(f"## {name}")
         items = [x for x in acc[name] if x]
-        if items:
-            for x in items:
-                out.append(x)
-                out.append("")
-        else:
-            out.append(f"_No {name.lower()}._")
+        if not items:
+            return  # omit empty section entirely
+        out.append(f"## {name}")
+        for x in items:
+            out.append(x)
             out.append("")
 
+    # narrative sections (only if content exists)
     emit_block("Summary")
     emit_block("Decisions")
 
-    out.append("## Actions")
+    # Actions (grouped)
     if action_items:
+        out.append("## Actions")
         if a.group_actions:
             buckets = {"high": [], "medium": [], "low": [], "other": []}
-            for rank, tag, text in sorted(action_items, key=lambda t: (t[0], t[2])):
-                key = (tag or "other").lower()
-                if key not in buckets:
-                    key = "other"
+            for rank, label, text in sorted(action_items, key=lambda t: (t[0], t[2].lower())):
+                key = label if label in buckets else "other"
                 buckets[key].append(f"- {text}")
-            for head in ["high", "medium", "low", "other"]:
-                if not buckets[head]:
-                    continue
-                label = "Other" if head == "other" else head.capitalize()
-                out.append(f"### {label} priority")
-                out.extend(buckets[head])
-                out.append("")
+            for head, title in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
+                if buckets[head]:
+                    out.append(f"### {title} priority")
+                    out.extend(buckets[head])
+                    out.append("")
         else:
-            for _, __, text in sorted(action_items, key=lambda t: (t[0], t[2])):
+            for _, __, text in sorted(action_items, key=lambda t: (t[0], t[2].lower())):
                 out.append(f"- {text}")
             out.append("")
-    else:
-        out.append("_No actions._")
-        out.append("")
 
     emit_block("Risks")
     emit_block("Dependencies")

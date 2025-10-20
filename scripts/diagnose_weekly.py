@@ -18,6 +18,9 @@ PRI = {
     "high": re.compile(r"\[high\]", re.I),
     "medium": re.compile(r"\[medium\]", re.I),
     "low": re.compile(r"\[low\]", re.I),
+    "p0": re.compile(r"\[p0\]", re.I),
+    "p1": re.compile(r"\[p1\]", re.I),
+    "p2": re.compile(r"\[p2\]", re.I),
 }
 
 def main():
@@ -68,12 +71,12 @@ def main():
         found_map = {s: False for s in SECTIONS}
         for m in HDR.finditer(txt):
             raw = m.group(1).strip()
-            base = raw.split()[0].rstrip(":-—–")
+            base = raw.split()[0].rstrip(":-—–").lower()
             for s in SECTIONS:
-                if base.lower() == s.lower():
+                if base == s.lower():
                     found_map[s] = True
 
-        # Actions block + bullet/priority counts
+        # Actions body bounding
         acts_info = "n/a"
         if found_map["Actions"]:
             hdr_pat = re.compile(r"^[ \t]*#{2,6}\s*Actions\b.*$", re.M | re.I)
@@ -83,15 +86,17 @@ def main():
                 body = txt[m.end(): m.end()+nxt.start()] if nxt else txt[m.end():]
                 bullets = [ln for ln in body.splitlines() if BULLET_RE.match(ln)]
                 n = len(bullets)
-                hi = sum(1 for line in body.splitlines() if PRI["high"].search(line))
-                me = sum(1 for line in body.splitlines() if PRI["medium"].search(line))
-                lo = sum(1 for line in body.splitlines() if PRI["low"].search(line))
-                # Fallback visibility (like aggregator)
-                if n == 0 and (hi or me or lo):
+                # count priorities (includes p0/p1/p2)
+                counts = {k: 0 for k in PRI}
+                for line in body.splitlines():
+                    for k, rx in PRI.items():
+                        if rx.search(line): counts[k] += 1
+                # fallback visibility (mirror aggregator intent)
+                if n == 0 and sum(counts.values()) > 0:
                     n = sum(1 for L in body.splitlines() if L.strip())
-                    acts_info = f"{n} lines (fallback; high:{hi}, medium:{me}, low:{lo})"
+                    acts_info = f"{n} lines (fallback; " + ", ".join(f"{k}:{v}" for k,v in counts.items()) + ")"
                 else:
-                    acts_info = f"{n} bullets (high:{hi}, medium:{me}, low:{lo})"
+                    acts_info = f"{n} bullets (" + ", ".join(f"{k}:{v}" for k,v in counts.items()) + ")"
 
         print("  Sections found:", ", ".join([s for s,v in found_map.items() if v]) or "(none)")
         print("  Actions:", acts_info)

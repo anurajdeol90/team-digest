@@ -42,22 +42,15 @@ jobs:
         id: daterange
         shell: bash
         run: |
-          # If inputs are provided, honor them.
           IN_START="${{ inputs.start_date }}"
           IN_END="${{ inputs.end_date }}"
           if [ -n "$IN_START" ] && [ -n "$IN_END" ]; then
-            START="$IN_START"
-            END="$IN_END"
+            START="$IN_START"; END="$IN_END"
           else
-            # Compute last Sunday (UTC) as END, then START=END-6 days.
             LAST_SUN=$(date -u -d "last sunday" +%Y-%m-%d)
-            # If today is Sunday, "last sunday" is today; use the previous Sunday instead.
-            DOW=$(date -u +%u)  # 1=Mon..7=Sun
-            if [ "$DOW" = "7" ]; then
-              LAST_SUN=$(date -u -d "$LAST_SUN -7 days" +%Y-%m-%d)
-            fi
-            END="$LAST_SUN"
-            START=$(date -u -d "$END -6 days" +%Y-%m-%d)
+            DOW=$(date -u +%u)  # 1..7
+            if [ "$DOW" = "7" ]; then LAST_SUN=$(date -u -d "$LAST_SUN -7 days" +%Y-%m-%d); fi
+            END="$LAST_SUN"; START=$(date -u -d "$END -6 days" +%Y-%m-%d)
           fi
           echo "start=$START" >> $GITHUB_OUTPUT
           echo "end=$END"     >> $GITHUB_OUTPUT
@@ -94,26 +87,26 @@ jobs:
           grep -m1 "^_Range:" "$OUTFILE" || true
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUTFILE" || true
-          
+
       - name: Debug — show Actions section from digest
         shell: bash
         run: |
           echo "---- Extracted Actions section ----"
           awk '/^## Actions$/, /^## [A-Z]/{print}' "$OUTFILE" | sed '$d' || true
 
-
-      - name: Sanity check (warn if fully empty)
+      - name: Sanity fail if fully empty
         shell: bash
         run: |
-          if grep -q "_No summary._" "$OUTFILE" && \
-             grep -q "_No decisions._" "$OUTFILE" && \
-             grep -q "_No actions._" "$OUTFILE" && \
-             grep -q "_No risks._" "$OUTFILE" && \
-             grep -q "_No dependencies._" "$OUTFILE" && \
-             grep -q "_No notes._" "$OUTFILE"; then
-            echo "::warning::Digest contains no content; likely date/window mismatch or headings not recognized."
-            echo "Top of digest:"
-            head -n 30 "$OUTFILE" || true
+          if grep -q "^## Summary$" "$OUTFILE" || \
+             grep -q "^## Decisions$" "$OUTFILE" || \
+             grep -q "^## Actions$" "$OUTFILE" || \
+             grep -q "^## Risks$" "$OUTFILE" || \
+             grep -q "^## Dependencies$" "$OUTFILE" || \
+             grep -q "^## Notes$" "$OUTFILE"; then
+            echo "Digest contains at least one non-empty section."
+          else
+            echo "::error::Digest contains no content."
+            exit 2
           fi
 
       - name: Upload artifact
