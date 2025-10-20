@@ -6,7 +6,7 @@ from pathlib import Path
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 PRIORITY_TAGS = {"high": 0, "medium": 1, "low": 2}
 
-# Accept -, *, +, numeric lists (1. / 1)), checkboxes [-] [ ] [x], Unicode bullets • ‣, en/em dashes – —
+# Wide bullet detection: -, *, +, numbered "1." or "1)", checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
     r'^[\s\u00A0]*('
     r'(?:[-*+])|'              # -, *, +
@@ -16,6 +16,9 @@ BULLET_RE = re.compile(
     r')\s+',
     re.M
 )
+
+# Tolerant header finder (same idea as diagnostics)
+HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
 
 def parse_args():
     p = argparse.ArgumentParser(description="Aggregate logs into a digest.")
@@ -28,21 +31,32 @@ def parse_args():
     p.add_argument("--group-actions", dest="group_actions", action="store_true")
     return p.parse_args()
 
-# Accept ##..######, any case, optional punctuation/text after section name
-def read_sections(text: str) -> dict:
-    secs = {}
+def normalize_heading(raw: str) -> str:
+    # Take first word, strip common trailing punctuation/dashes (colon, em/en)
+    base = raw.strip().split()[0].rstrip(":-—–").lower()
+    return base
+
+def slice_sections(text: str) -> dict:
+    """
+    Find all ##..###### headings, normalize names, and slice the body between headings.
+    This mirrors the tolerant logic used in diagnostics.
+    """
     text = text.replace("\r\n", "\n")
-    for sec in SECTION_ORDER:
-        pat = re.compile(
-            rf"^[ \t]*#{2,6}\s*{re.escape(sec)}\b.*$"   # heading line
-            rf"([\s\S]*?)"                               # body (lazy)
-            rf"(?=^[ \t]*#{2,6}\s+\S|\Z)",              # next heading or EOF
-            re.M | re.I,
-        )
-        m = pat.search(text)
-        if m:
-            secs[sec] = m.group(1).strip()
-    return secs
+    sections = {}
+    matches = list(HDR_LINE.finditer(text))
+    if not matches:
+        return sections
+    for i, m in enumerate(matches):
+        raw = m.group(1)
+        base = normalize_heading(raw)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        for canonical in SECTION_ORDER:
+            if base == canonical.lower():
+                sections[canonical] = body
+                break
+    return sections
 
 def daterange(start: dt.date, end: dt.date):
     cur = start
@@ -84,18 +98,18 @@ def main():
             continue
         matched.append(p.as_posix())
         t = io.open(p, "r", encoding="utf-8").read()
-        secs = read_sections(t)
+        secs = slice_sections(t)  # ← robust, diagnostics-aligned
 
-        # collect narrative sections
+        # narrative sections
         for k in ["Summary", "Decisions", "Risks", "Dependencies", "Notes"]:
             if secs.get(k):
                 acc[k].append(secs[k].strip())
 
-        # collect actions
+        # actions
         actions_block = secs.get("Actions", "")
         bullets = collect_bullets(actions_block)
 
-        # Fallback: if no bullets but there are priority tags, treat each non-empty line as an action
+        # Fallback: if no bullets but priority tags exist, treat each non-empty line as an item
         if not bullets and actions_block:
             lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
             if any(re.search(r"\[(?:high|medium|low)\]", L, re.I) for L in lines):
@@ -139,7 +153,6 @@ def main():
                 key = (tag or "other").lower()
                 if key not in buckets:
                     key = "other"
-                # strip leading bullet tokens when rendering
                 clean = BULLET_RE.sub("", line).strip()
                 buckets[key].append(f"- {clean}")
             for head in ["high", "medium", "low", "other"]:

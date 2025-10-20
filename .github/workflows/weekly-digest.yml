@@ -94,6 +94,13 @@ jobs:
           grep -m1 "^_Range:" "$OUTFILE" || true
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUTFILE" || true
+          
+      - name: Debug — show Actions section from digest
+        shell: bash
+        run: |
+          echo "---- Extracted Actions section ----"
+          awk '/^## Actions$/, /^## [A-Z]/{print}' "$OUTFILE" | sed '$d' || true
+
 
       - name: Sanity check (warn if fully empty)
         shell: bash
