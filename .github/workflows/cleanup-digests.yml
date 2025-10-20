@@ -31,7 +31,7 @@ jobs:
           find outputs -type f -name "*.md" -mtime +90 -delete || true
 
       - name: Commit cleanup (if any)
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore(cleanup): prune digests older than 90 days"
           file_pattern: outputs/*.md
