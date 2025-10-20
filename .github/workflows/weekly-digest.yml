@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      # ---------- Resolve INPUT_DIR safely (no heredocs) ----------
+      # ---------- Resolve INPUT_DIR safely ----------
       - name: Resolve INPUT_DIR (override → repo var → logs/)
         id: resolve
         shell: bash
@@ -48,17 +48,12 @@ jobs:
             CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
           fi
           [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
-
-          # Expand literal $GITHUB_WORKSPACE if the user typed it
           case "$CANDIDATE" in
             '$GITHUB_WORKSPACE'/*) CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}";;
           esac
-
-          # If relative, make it repo-relative
           if [[ "$CANDIDATE" != /* ]]; then
             CANDIDATE="${GITHUB_WORKSPACE%/}/$CANDIDATE"
           fi
-
           echo "INPUT_DIR=$CANDIDATE" | tee -a "$GITHUB_ENV"
 
       # ---------- Week window (Mon..Sun) ----------
