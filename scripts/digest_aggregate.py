@@ -2,12 +2,14 @@
 # scripts/digest_aggregate.py
 import argparse, re, sys, io, os, datetime as dt
 from pathlib import Path
+from collections import defaultdict, Counter
 
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 
 # priority ranks: lower = higher priority
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}  # map pN -> label
+VALID_PRIOS = {"high", "medium", "low"}
 
 # Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
@@ -117,7 +119,7 @@ def strip_priority_tag(s: str) -> str:
     return re.sub(r'^\s*\[(?:high|medium|low|p0|p1|p2)\]\s*', '', s, flags=re.I)
 
 def main():
-    p = argparse.ArgumentParser(description="Aggregate logs into a weekly (or arbitrary range) digest.")
+    p = argparse.ArgumentParser(description="Aggregate logs into a weekly/monthly (or any range) digest.")
     p.add_argument("--logs-dir", default="logs")
     p.add_argument("--start", required=True)   # YYYY-MM-DD inclusive
     p.add_argument("--end", required=True)     # YYYY-MM-DD inclusive
@@ -125,7 +127,15 @@ def main():
     p.add_argument("--title", default="")
     p.add_argument("--expect-missing", action="store_true")
     p.add_argument("--group-actions", action="store_true")
-    p.add_argument("--flat-by-name", action="store_true", help="Sort actions globally by name→priority→text")
+    p.add_argument("--flat-by-name", action="store_true",
+                   help="Sort actions globally by name→priority→text (no priority buckets)")
+    # NEW: exec KPIs
+    p.add_argument("--emit-kpis", action="store_true",
+                   help="Emit an Executive KPIs block near the top (actions, H/M/L split, decisions, risks, owners)")
+    p.add_argument("--owner-breakdown", action="store_true",
+                   help="Emit a per-owner table (High/Med/Low/Total), sorted by Total desc")
+    p.add_argument("--owner-top", type=int, default=8,
+                   help="Max owners to show in the breakdown (others combined as “Other”). Default: 8")
     args = p.parse_args()
 
     logs_dir = Path(args.logs_dir)
@@ -135,6 +145,13 @@ def main():
     acc = {k: [] for k in SECTION_ORDER}
     action_items = []  # list of (rank,label,who,text)
     matched = []
+
+    # NEW: counters for KPIs
+    prio_counts = Counter()             # "high"/"medium"/"low"/"other"
+    owner_counts = defaultdict(lambda: Counter({"high":0, "medium":0, "low":0}))
+    decisions_count = 0
+    risks_count = 0
+    owners_seen = set()
 
     for d in daterange(start, end):
         pth = logs_dir / f"notes-{d.isoformat()}.md"
@@ -151,6 +168,22 @@ def main():
                 if txt:
                     acc[k].append(txt)
 
+        # decision/risk counts (based on bullets, with simple fallback)
+        if secs.get("Decisions"):
+            dec_bul = collect_bullets(secs["Decisions"])
+            if dec_bul:
+                decisions_count += len(dec_bul)
+            else:
+                # count non-empty lines as a fallback
+                decisions_count += sum(1 for L in secs["Decisions"].splitlines() if L.strip())
+
+        if secs.get("Risks"):
+            risk_bul = collect_bullets(secs["Risks"])
+            if risk_bul:
+                risks_count += len(risk_bul)
+            else:
+                risks_count += sum(1 for L in secs["Risks"].splitlines() if L.strip())
+
         # actions
         actions_block = secs.get("Actions", "")
         bullets = collect_bullets(actions_block)
@@ -162,6 +195,11 @@ def main():
             label, rank = detect_priority(line)
             text = clean_item_text(line)
             who  = extract_name(text).lower()
+            owners_seen.add(who) if who else None
+            # KPI tallies
+            prio_counts[label] += 1
+            if label in VALID_PRIOS and who:
+                owner_counts[who][label] += 1
             action_items.append((rank, label, who, text))
 
     title = args.title or f"Team Digest ({start.isoformat()} - {end.isoformat()})"
@@ -171,6 +209,41 @@ def main():
         f"Days matched: {len(matched)} | Actions: {len(action_items)}_"
     )
     out.append("")
+
+    # NEW: Executive KPIs block
+    if args.emit_kpis:
+        H, M, L = prio_counts["high"], prio_counts["medium"], prio_counts["low"]
+        owners_total = len([o for o in owners_seen if o])
+        out.append("## Executive KPIs")
+        out.append(f"- **Actions:** {len(action_items)} (High: {H}, Medium: {M}, Low: {L})")
+        out.append(f"- **Decisions:** {decisions_count}   ·   **Risks:** {risks_count}")
+        out.append(f"- **Owners:** {owners_total}   ·   **Days with notes:** {len(matched)}")
+        out.append("")
+
+        if args.owner_breakdown and owner_counts:
+            # Prepare a compact table of top N owners by total actions (H+M+L)
+            rows = []
+            for owner, cc in owner_counts.items():
+                total = cc["high"] + cc["medium"] + cc["low"]
+                rows.append((owner, cc["high"], cc["medium"], cc["low"], total))
+            rows.sort(key=lambda r: (-r[4], r[0]))
+            top = rows[: args.owner_top]
+            rest = rows[args.owner_top :]
+            if rest:
+                rest_high = sum(r[1] for r in rest)
+                rest_med  = sum(r[2] for r in rest)
+                rest_low  = sum(r[3] for r in rest)
+                rest_tot  = sum(r[4] for r in rest)
+                top.append(("Other", rest_high, rest_med, rest_low, rest_tot))
+
+            out.append("#### Owner breakdown (top)")
+            out.append("| Owner | High | Medium | Low | Total |")
+            out.append("|:------|----:|------:|---:|-----:|")
+            for owner, hi, me, lo, tot in top:
+                # Capitalize owner nicely (stored as lower)
+                owner_disp = owner.title() if owner != "Other" else owner
+                out.append(f"| {owner_disp} | {hi} | {me} | {lo} | **{tot}** |")
+            out.append("")
 
     def emit_block(name: str):
         items = [x for x in acc[name] if x]

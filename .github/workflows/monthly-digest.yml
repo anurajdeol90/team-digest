@@ -95,6 +95,9 @@ jobs:
             --output "$OUTFILE"
             --title  "Team Digest ($START - $END)"
             --expect-missing
+            --emit-kpis
+            --owner-breakdown
+            --owner-top 8
           )
 
           # Priority grouping (default true unless flat_by_name)
@@ -116,6 +119,7 @@ jobs:
 
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUTFILE" || true
+
 
       - name: Sanity fail if fully empty
         shell: bash
