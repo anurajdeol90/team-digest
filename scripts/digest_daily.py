@@ -4,9 +4,10 @@
 # Daily digest that mirrors weekly style:
 # - tolerant section slicing (##..######), mojibake fixes
 # - wide bullet detection (- * +, 1./1), checkboxes, unicode bullets/dashes)
-# - optional grouping of Actions by [high]/[medium]/[low] and [p0]/[p1]/[p2]
-# - sorting inside groups by name (if detected) then text
+# - supports [high]/[medium]/[low] and [p0]/[p1]/[p2]
 # - omit empty sections entirely
+# - default: group actions by priority, sort within groups by name → text
+# - optional: --flat-by-name for global sorting by name → priority → text
 
 import argparse, re, sys, io, os, datetime as dt
 from pathlib import Path
@@ -90,7 +91,7 @@ def normalize_block_text(block: str) -> str:
         return ""
     lines = []
     for ln in fix_mojibake(block).splitlines():
-        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)
+        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)  # drop leading backslash before a bullet
         lines.append(ln)
     return "\n".join(lines).strip()
 
@@ -123,18 +124,24 @@ def extract_name(text: str) -> str:
 def main():
     ap = argparse.ArgumentParser(description="Build a daily digest from a single log file.")
     ap.add_argument("--logs-dir", default="logs")
-    ap.add_argument("--date", help="YYYY-MM-DD (defaults to today in UTC)", default=dt.datetime.utcnow().date().isoformat())
+    ap.add_argument("--date", help="YYYY-MM-DD (defaults to today in UTC)",
+                    default=dt.datetime.utcnow().date().isoformat())
     ap.add_argument("--output", required=True)
     ap.add_argument("--title", default="")
     ap.add_argument("--group-actions", action="store_true")
-    ap.add_argument("--sort-actions", default="priority,name,text", help="comma list: priority,name,text (order matters)")
+    ap.add_argument("--flat-by-name", action="store_true",
+                    help="Sort actions globally by name→priority→text (no priority buckets)")
+    ap.add_argument("--sort-actions", default="priority,name,text",
+                    help="(ignored in --flat-by-name) comma list for within-bucket sort: priority,name,text")
     args = ap.parse_args()
 
     log_path = Path(args.logs_dir) / f"notes-{args.date}.md"
     if not log_path.exists():
         title = args.title or f"Team Digest ({args.date})"
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-        io.open(args.output, "w", encoding="utf-8").write(f"# {title}\n\n_No log for {args.date} in {args.logs_dir}_\n")
+        io.open(args.output, "w", encoding="utf-8").write(
+            f"# {title}\n\n_No log for {args.date} in {args.logs_dir}_\n"
+        )
         sys.exit(0)
 
     txt = io.open(log_path, "r", encoding="utf-8").read()
@@ -163,19 +170,6 @@ def main():
         who  = extract_name(text).lower()
         action_items.append((rank, label, who, text))
 
-    # sorting behavior
-    keys = [k.strip().lower() for k in args.sort_actions.split(",") if k.strip()]
-    def sort_key(item):
-        rank, label, who, text = item
-        parts = []
-        for k in keys:
-            if k == "priority": parts.append(rank)
-            elif k == "name":   parts.append(who)
-            elif k == "text":   parts.append(text.lower())
-        return tuple(parts) if parts else (rank, who, text.lower())
-
-    action_items.sort(key=sort_key)
-
     # render
     title = args.title or f"Team Digest ({args.date})"
     out = [f"# {title}", ""]
@@ -194,9 +188,15 @@ def main():
 
     if action_items:
         out.append("## Actions")
-        if args.group_actions:
+        if args.flat_by_name:
+            # Global: name → priority → text
+            for _, label, who, text in sorted(action_items, key=lambda t: (t[2], t[0], t[3].lower())):
+                out.append(f"- [{label}] {text}")
+            out.append("")
+        elif args.group_actions:
+            # Bucketed: priority → name → text (within bucket)
             buckets = {"high": [], "medium": [], "low": [], "other": []}
-            for rank, label, who, text in action_items:
+            for rank, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
                 key = label if label in buckets else "other"
                 buckets[key].append(f"- {text}")
             for head, title_h in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
@@ -205,7 +205,8 @@ def main():
                     out.extend(buckets[head])
                     out.append("")
         else:
-            for _, __, ___, text in action_items:
+            # Flat but still by priority first (legacy default without grouping)
+            for _, __, ___, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
                 out.append(f"- {text}")
             out.append("")
 

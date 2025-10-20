@@ -5,30 +5,17 @@ from pathlib import Path
 
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 
-# priority ranks: lower = higher priority
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
-P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}  # map pN -> label
+P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}
 
-# Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
-    r'^[\s\u00A0]*('
-    r'(?:[-*+])|'              # -, *, +
-    r'(?:\d+[.)])|'            # 1. or 1)
-    r'(?:\[[ xX\-]\])|'        # [ ], [x], [-]
-    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'  # • ‣ ⁃ ∙ ▪ ▫ ● ◦ – —
-    r')\s+',
+    r'^[\s\u00A0]*((?:[-*+])|(?:\d+[.)])|(?:\[[ xX\-]\])|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+',
     re.M
 )
+LEAD_TOKEN_RE = re.compile(r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+')
 
-# Same as BULLET_RE but allows an optional leading backslash (for escaped bullets in logs)
-LEAD_TOKEN_RE = re.compile(
-    r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+'
-)
-
-# tolerant header locator
 HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
 
-# fix common mojibake from mis-decoding
 MOJIBAKE_FIXES = {
     "â€“": "–", "â€”": "—", "â€˜": "‘", "â€™": "’",
     "â€œ": "“", "â€\x9d": "”", "â€¢": "•",
@@ -38,17 +25,6 @@ def fix_mojibake(s: str) -> str:
     for k, v in MOJIBAKE_FIXES.items():
         s = s.replace(k, v)
     return s
-
-def parse_args():
-    p = argparse.ArgumentParser(description="Aggregate logs into a digest.")
-    p.add_argument("--logs-dir", default="logs")
-    p.add_argument("--start", required=True)   # YYYY-MM-DD
-    p.add_argument("--end", required=True)     # YYYY-MM-DD inclusive
-    p.add_argument("--output", required=True)
-    p.add_argument("--title", default="")
-    p.add_argument("--expect-missing", dest="expect_missing", action="store_true")
-    p.add_argument("--group-actions", dest="group_actions", action="store_true")
-    return p.parse_args()
 
 def normalize_heading(raw: str) -> str:
     return raw.strip().split()[0].rstrip(":-—–").lower()
@@ -89,112 +65,125 @@ def collect_bullets(block: str):
             out.append(s.strip())
     return out
 
-def detect_priority(line: str):
-    # return (label, rank). label is one of high/medium/low/other
-    m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
-    if m:
-        tag = m.group(1).lower()
-        label = P_EQUIV.get(tag, tag)  # map pN → high/medium/low
-        return label, PRIORITY_RANK.get(label, 3)
-    return "other", 3
-
 def clean_item_text(line: str) -> str:
-    # remove leading bullet-like token (with optional backslash)
     s = LEAD_TOKEN_RE.sub("", line).strip()
-    # collapse duplicate escapes if any
     s = re.sub(r'^[\\]+', "", s).strip()
     return s
 
 def normalize_block_text(block: str) -> str:
-    """Unescape leading '\-' '\*' etc in narrative sections and fix mojibake."""
     if not block:
         return ""
     lines = []
     for ln in fix_mojibake(block).splitlines():
-        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)  # drop leading backslash before a bullet
+        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)
         lines.append(ln)
     return "\n".join(lines).strip()
 
-def main():
-    a = parse_args()
-    logs_dir = Path(a.logs_dir)
-    start = dt.date.fromisoformat(a.start)
-    end   = dt.date.fromisoformat(a.end)
+def detect_priority(line: str):
+    m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
+    if m:
+        tag = m.group(1).lower()
+        label = P_EQUIV.get(tag, tag)
+        return label, PRIORITY_RANK.get(label, 3)
+    return "other", 3
 
-    # accumulate content across days
+NAME_PATTERNS = [
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),
+    re.compile(r"\(owner:\s*([^)]+?)\)", re.I),
+]
+
+def extract_name(text: str) -> str:
+    for rx in NAME_PATTERNS:
+        m = rx.search(text)
+        if m:
+            return m.group(1).strip()
+    m = re.search(r"\b([A-Z][a-zA-Z.\-]+(?:\s+[A-Z][a-zA-Z.\-]+)?)\b", text)
+    return m.group(1) if m else ""
+
+def main():
+    p = argparse.ArgumentParser(description="Aggregate logs into a weekly digest.")
+    p.add_argument("--logs-dir", default="logs")
+    p.add_argument("--start", required=True)
+    p.add_argument("--end", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--title", default="")
+    p.add_argument("--expect-missing", action="store_true")
+    p.add_argument("--group-actions", action="store_true")
+    p.add_argument("--flat-by-name", action="store_true", help="Sort actions globally by name→priority→text")
+    args = p.parse_args()
+
+    logs_dir = Path(args.logs_dir)
+    start = dt.date.fromisoformat(args.start)
+    end   = dt.date.fromisoformat(args.end)
+
     acc = {k: [] for k in SECTION_ORDER}
-    action_items = []  # list[(rank,label,text)]
+    action_items = []
     matched = []
 
     for d in daterange(start, end):
-        p = logs_dir / f"notes-{d.isoformat()}.md"
-        if not p.exists():
+        pth = logs_dir / f"notes-{d.isoformat()}.md"
+        if not pth.exists():
             continue
-        matched.append(p.as_posix())
-        t = io.open(p, "r", encoding="utf-8").read()
+        matched.append(pth.as_posix())
+        t = io.open(pth, "r", encoding="utf-8").read()
         secs = slice_sections(t)
 
-        # narrative sections (normalize bullet escapes + mojibake)
         for k in ["Summary", "Decisions", "Risks", "Dependencies", "Notes"]:
             if secs.get(k):
                 txt = normalize_block_text(secs[k])
                 if txt:
                     acc[k].append(txt)
 
-        # actions
         actions_block = secs.get("Actions", "")
         bullets = collect_bullets(actions_block)
-
-        # Fallback: if no bullets but priority tags exist, treat non-empty lines as items
         if not bullets and actions_block:
             lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
             if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
                 bullets = lines
-
         for line in bullets:
             label, rank = detect_priority(line)
-            action_items.append((rank, label, clean_item_text(line)))
+            text = clean_item_text(line)
+            who  = extract_name(text).lower()
+            action_items.append((rank, label, who, text))
 
-    if not matched and not a.expect_missing:
-        sys.stderr.write(f"[weekly] No log files matched {start}..{end} in {logs_dir}\n")
-        sys.exit(2)
-
-    title = a.title or f"Team Digest ({start.isoformat()} - {end.isoformat()})"
+    title = args.title or f"Team Digest ({start.isoformat()} - {end.isoformat()})"
     out = [f"# {title}", ""]
     out.append(
-        f"_Range: {start.isoformat()} → {end.isoformat()} | Source: {a.logs_dir} | "
+        f"_Range: {start.isoformat()} → {end.isoformat()} | Source: {args.logs_dir} | "
         f"Days matched: {len(matched)} | Actions: {len(action_items)}_"
     )
     out.append("")
 
     def emit_block(name: str):
         items = [x for x in acc[name] if x]
-        if not items:
-            return  # omit empty section entirely
+        if not items: return
         out.append(f"## {name}")
         for x in items:
             out.append(x)
             out.append("")
 
-    # narrative sections (only if content exists)
     emit_block("Summary")
     emit_block("Decisions")
 
-    # Actions (grouped)
     if action_items:
         out.append("## Actions")
-        if a.group_actions:
+        if args.flat_by_name:
+            for _, label, who, text in sorted(action_items, key=lambda t: (t[2], t[0], t[3].lower())):
+                out.append(f"- [{label}] {text}")
+            out.append("")
+        elif args.group_actions:
             buckets = {"high": [], "medium": [], "low": [], "other": []}
-            for rank, label, text in sorted(action_items, key=lambda t: (t[0], t[2].lower())):
+            for rank, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
                 key = label if label in buckets else "other"
                 buckets[key].append(f"- {text}")
-            for head, title in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
+            for head, title_h in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
                 if buckets[head]:
-                    out.append(f"### {title} priority")
+                    out.append(f"### {title_h} priority")
                     out.extend(buckets[head])
                     out.append("")
         else:
-            for _, __, text in sorted(action_items, key=lambda t: (t[0], t[2].lower())):
+            for _, __, ___, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
                 out.append(f"- {text}")
             out.append("")
 
@@ -202,8 +191,8 @@ def main():
     emit_block("Dependencies")
     emit_block("Notes")
 
-    Path(a.output).parent.mkdir(parents=True, exist_ok=True)
-    io.open(a.output, "w", encoding="utf-8").write("\n".join(out).rstrip() + "\n")
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    io.open(args.output, "w", encoding="utf-8").write("\n".join(out).rstrip() + "\n")
 
 if __name__ == "__main__":
     main()
