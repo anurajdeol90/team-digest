@@ -55,7 +55,7 @@ jobs:
             # Use specified month
             START="$(date -u -d "${IN_Y}-${IN_M}-01" +%Y-%m-%d)"
           else
-            # Previous calendar month
+            # Previous calendar month from today
             START="$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-%d)"
           fi
 
@@ -87,6 +87,7 @@ jobs:
           START: ${{ steps.range.outputs.start }}
           END:   ${{ steps.range.outputs.end }}
         run: |
+          set -euo pipefail
           mkdir -p outputs
           ARGS=(
             --logs-dir "$LOGS_DIR"
@@ -120,18 +121,17 @@ jobs:
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUTFILE" || true
 
-
       - name: Sanity fail if fully empty
         shell: bash
         run: |
-          if grep -q "^## Summary$" "$OUTFILE" || \
-             grep -q "^## Decisions$" "$OUTFILE" || \
-             grep -q "^## Actions$" "$OUTFILE" || \
-             grep -q "^## Risks$" "$OUTFILE" || \
-             grep -q "^## Dependencies$" "$OUTFILE" || \
-             grep -q "^## Notes$" "$OUTFILE"; then
-            echo "Digest contains at least one non-empty section."
+          set -euo pipefail
+          echo "---- Sanity check ----"
+          echo "Looking for any non-empty top-level sections…"
+          if grep -qE '^## (Summary|Decisions|Actions|Risks|Dependencies|Notes|Executive KPIs)$' "$OUTFILE"; then
+            echo "OK: At least one section header found."
           else
+            echo "---- First 120 lines for debugging ----"
+            nl -ba "$OUTFILE" | head -n 120 || true
             echo "::error::Digest contains no content."
             exit 2
           fi
