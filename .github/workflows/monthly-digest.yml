@@ -1,128 +1,143 @@
 name: Monthly Digest
 
 on:
-  schedule:
-    - cron: "0 8 1 * *"  # 1st day 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
-      input_dir:
-        description: "Override INPUT_DIR (repo-relative or absolute)"
+      year:
+        description: "4-digit year (optional; default: previous month)"
         required: false
         type: string
+      month:
+        description: "1-12 (optional; default: previous month)"
+        required: false
+        type: string
+      flat_by_name:
+        description: "Sort Actions globally by name→priority (no priority buckets)"
+        required: false
+        type: boolean
+      group_actions:
+        description: "Group Actions by priority (ignored if flat_by_name is true)"
+        required: false
+        default: true
+        type: boolean
 
 jobs:
-  run:
+  monthly:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
+      LOGS_DIR: logs
+      OUTFILE: outputs/monthly.md
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install team-digest
+      - name: Install deps
+        run: python -m pip install --upgrade pip
+
+      - name: Resolve month range (inputs → previous calendar month)
+        id: range
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install "team-digest>=1.1.6,<2"
+          IN_Y="${{ inputs.year }}"
+          IN_M="${{ inputs.month }}"
 
-      - name: Resolve INPUT_DIR (override → repo var → logs/)
-        id: resolve
-        shell: bash
-        run: |
-          set -euo pipefail
-          CANDIDATE="${{ github.event.inputs.input_dir }}"
-          if [ -z "${CANDIDATE}" ] && [ -n "${{ vars.DIGEST_INPUT_DIR }}" ]; then
-            CANDIDATE="${{ vars.DIGEST_INPUT_DIR }}"
-          fi
-          [ -z "${CANDIDATE}" ] && CANDIDATE="logs"
-
-          if [ -d "${CANDIDATE}" ]; then
-            INPUT_DIR="${CANDIDATE}"
-          elif [ -d "${GITHUB_WORKSPACE}/${CANDIDATE}" ]; then
-            INPUT_DIR="${GITHUB_WORKSPACE}/${CANDIDATE}"
+          if [ -n "$IN_Y" ] && [ -n "$IN_M" ]; then
+            # Use specified month
+            START="$(date -u -d "${IN_Y}-${IN_M}-01" +%Y-%m-%d)"
           else
-            INPUT_DIR="${CANDIDATE}"
+            # Previous calendar month
+            START="$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-%d)"
           fi
 
-          echo "INPUT_DIR=${INPUT_DIR}" | tee -a "${GITHUB_ENV}"
+          # END = last day of that month
+          END="$(date -u -d "$START +1 month -1 day" +%Y-%m-%d)"
 
-      - name: Compute previous calendar month (UTC)
-        id: window
+          echo "start=$START" >> "$GITHUB_OUTPUT"
+          echo "end=$END"     >> "$GITHUB_OUTPUT"
+          echo "Resolved month window (UTC): $START .. $END"
+
+      - name: Diagnostics — list logs
         shell: bash
         run: |
-          set -euo pipefail
-          FIRST_THIS="$(date +%Y-%m-01)"
-          LAST_PREV="$(date +%F -d "${FIRST_THIS} - 1 day")"
-          FROM="$(date +%Y-%m-01 -d "${LAST_PREV}")"
-          TO="${LAST_PREV}"
-
-          echo "FROM=${FROM}" | tee -a "${GITHUB_ENV}"
-          echo "TO=${TO}"     | tee -a "${GITHUB_ENV}"
-          echo "Window: ${FROM} .. ${TO}"
-
-      - name: Diagnostics — list and match notes by filename date
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "INPUT_DIR=${INPUT_DIR}"
-          echo "All files in ${INPUT_DIR}:"
-          ls -la "${INPUT_DIR}" || true
+          echo "Tracked under logs/:"
+          git ls-files "logs/*" || true
           echo
+          echo "Directory listing of $LOGS_DIR:"
+          ls -la "$LOGS_DIR" || true
 
-          echo "Matching notes-YYYY-MM-DD.* within ${FROM}..${TO} (by filename date):"
-          shopt -s nullglob
-          hits=()
-          for f in "${INPUT_DIR}"/notes-????-??-??.*; do
-            base="$(basename "$f")"
-            day="${base#notes-}"; day="${day%%.*}"
-            if [[ "${day}" >="${FROM}" && "${day}" <= "${TO}" ]]; then
-              hits+=("${base}")
-            fi
-          done
-          if [ "${#hits[@]}" -gt 0 ]; then
-            printf 'MATCHES: %s\n' "$(IFS=', '; echo "${hits[*]}")"
-          else
-            echo "MATCHES: (none)"
-          fi
+      - name: Diagnostics — match notes by filename date (robust)
+        env:
+          START: ${{ steps.range.outputs.start }}
+          END:   ${{ steps.range.outputs.end }}
+        run: python scripts/diagnose_weekly.py
 
-      - name: Generate monthly digest
+      - name: Aggregate month → monthly.md
         shell: bash
+        env:
+          START: ${{ steps.range.outputs.start }}
+          END:   ${{ steps.range.outputs.end }}
         run: |
-          set -euo pipefail
           mkdir -p outputs
-          team-digest --input "${INPUT_DIR}" --from "${FROM}" --to "${TO}" --format md -o outputs/monthly.md
-          echo '---- Preview (first 60 lines) ----'
-          head -n 60 outputs/monthly.md || true
+          ARGS=(
+            --logs-dir "$LOGS_DIR"
+            --start "$START"
+            --end   "$END"
+            --output "$OUTFILE"
+            --title  "Team Digest ($START - $END)"
+            --expect-missing
+          )
 
-      - name: Resolve Slack webhook (optional)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK_URL }}" >> "${GITHUB_ENV}"
-          elif [ -n "${{ secrets.SLACK_WEBHOOK }}" ]; then
-            echo "SLACK_WEBHOOK=${{ secrets.SLACK_WEBHOOK }}" >> "${GITHUB_ENV}"
-          else
-            echo "SLACK_WEBHOOK=" >> "${GITHUB_ENV}"
+          # Priority grouping (default true unless flat_by_name)
+          if [ "${{ inputs.flat_by_name }}" != "true" ]; then
+            if [ "${{ inputs.group_actions }}" = "true" ] || [ -z "${{ inputs.group_actions }}" ]; then
+              ARGS+=( --group-actions )
+            fi
           fi
 
-      - name: Post to Slack (if webhook is set)
-        if: env.SLACK_WEBHOOK != ''
+          # Global sort by name → priority
+          if [ "${{ inputs.flat_by_name }}" = "true" ]; then
+            ARGS+=( --flat-by-name )
+          fi
+
+          python scripts/digest_aggregate.py "${ARGS[@]}"
+
+          echo "---- Counts line ----"
+          grep -m1 "^_Range:" "$OUTFILE" || true
+
+          echo "---- Preview (first 60 lines) ----"
+          head -n 60 "$OUTFILE" || true
+
+      - name: Sanity fail if fully empty
         shell: bash
         run: |
-          set -euo pipefail
-          PAYLOAD="$(jq -Rs --arg pre '```' '{text: ($pre + . + $pre)}' < outputs/monthly.md)"
-          curl -fsSL -H 'Content-Type: application/json' --data-raw "${PAYLOAD}" "${SLACK_WEBHOOK}"
+          if grep -q "^## Summary$" "$OUTFILE" || \
+             grep -q "^## Decisions$" "$OUTFILE" || \
+             grep -q "^## Actions$" "$OUTFILE" || \
+             grep -q "^## Risks$" "$OUTFILE" || \
+             grep -q "^## Dependencies$" "$OUTFILE" || \
+             grep -q "^## Notes$" "$OUTFILE"; then
+            echo "Digest contains at least one non-empty section."
+          else
+            echo "::error::Digest contains no content."
+            exit 2
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: monthly-digest
-          path: outputs/**
+          path: ${{ env.OUTFILE }}
+
+      - name: Post to Slack (optional)
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: python scripts/post_to_slack.py "$OUTFILE"
