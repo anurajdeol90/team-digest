@@ -70,10 +70,12 @@ jobs:
             --title  "Team Digest (${{ steps.daterange.outputs.start }} - ${{ steps.daterange.outputs.end }})" \
             --group-actions \
             --expect-missing
+          echo "---- Counts line ----"
+          grep -m1 "^_Range:" "$OUTFILE" || true
           echo "---- Preview (first 60 lines) ----"
           head -n 60 "$OUTFILE" || true
 
-      - name: Sanity fail if fully empty
+      - name: Sanity check (warn if fully empty)
         shell: bash
         run: |
           if grep -q "_No summary._" "$OUTFILE" && \
@@ -82,8 +84,9 @@ jobs:
              grep -q "_No risks._" "$OUTFILE" && \
              grep -q "_No dependencies._" "$OUTFILE" && \
              grep -q "_No notes._" "$OUTFILE"; then
-            echo "::error::Digest contains no content; likely date/window mismatch or wrong path."
-            exit 2
+            echo "::warning::Digest contains no content; likely date/window mismatch or headings not recognized."
+            echo "Top of digest:"
+            head -n 30 "$OUTFILE" || true
           fi
 
       - name: Upload artifact

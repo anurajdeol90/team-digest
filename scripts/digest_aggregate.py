@@ -80,7 +80,7 @@ def main():
             tag, rank = detect_priority(line)
             action_items.append((rank, tag or "", line))
 
-    # <- This is the line that got broken in your copy:
+    # Stay strict only if no files matched AND strict mode
     if not matched and not a.expect_missing:
         sys.stderr.write(f"[weekly] No log files matched {start}..{end} in {logs_dir}\n")
         sys.exit(2)
