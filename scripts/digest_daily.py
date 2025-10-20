@@ -98,11 +98,15 @@ def detect_priority(line: str):
     m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
     if m:
         tag = m.group(1).lower()
-        label = {"p0":"high","p1":"medium","p2":"low"}.get(tag, tag)
-        return label, {"high":0,"medium":1,"low":2}.get(label, 3)
+        label = P_EQUIV.get(tag, tag)
+        return label, PRIORITY_RANK.get(label, 3)
     return "other", 3
 
 # --- simple "name" extractor for secondary sort ---
+# Tries patterns like:
+#   - [high] Alex to ...
+#   - [p1] Priya – ...
+#   - ... (owner: Anuraj Deol)
 NAME_PATTERNS = [
     re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),            # ] Alex to
     re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),        # ] Priya — ...
@@ -126,7 +130,6 @@ def main():
     ap.add_argument("--sort-actions", default="priority,name,text", help="comma list: priority,name,text (order matters)")
     args = ap.parse_args()
 
-    # BUGFIX: use args.logs_dir (underscore), not args.logs-dir
     log_path = Path(args.logs_dir) / f"notes-{args.date}.md"
     if not log_path.exists():
         title = args.title or f"Team Digest ({args.date})"
@@ -150,6 +153,7 @@ def main():
     actions_block = secs.get("Actions", "")
     bullets = collect_bullets(actions_block)
     if not bullets and actions_block:
+        # fallback if priorities present
         lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
         if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
             bullets = lines
