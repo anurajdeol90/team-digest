@@ -98,15 +98,11 @@ def detect_priority(line: str):
     m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
     if m:
         tag = m.group(1).lower()
-        label = P_EQUIV.get(tag, tag)
-        return label, PRIORITY_RANK.get(label, 3)
+        label = {"p0":"high","p1":"medium","p2":"low"}.get(tag, tag)
+        return label, {"high":0,"medium":1,"low":2}.get(label, 3)
     return "other", 3
 
 # --- simple "name" extractor for secondary sort ---
-# Tries patterns like:
-#   - [high] Alex to ...
-#   - [p1] Priya – ...
-#   - ... (owner: Anuraj Deol)
 NAME_PATTERNS = [
     re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),            # ] Alex to
     re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),        # ] Priya — ...
@@ -117,7 +113,6 @@ def extract_name(text: str) -> str:
         m = rx.search(text)
         if m:
             return m.group(1).strip()
-    # fallback: first token that looks like a Name (Capitalized)
     m = re.search(r"\b([A-Z][a-zA-Z.\-]+(?:\s+[A-Z][a-zA-Z.\-]+)?)\b", text)
     return m.group(1) if m else ""
 
@@ -128,12 +123,12 @@ def main():
     ap.add_argument("--output", required=True)
     ap.add_argument("--title", default="")
     ap.add_argument("--group-actions", action="store_true")
-    ap.add_argument("--sort-actions", default="priority,name,text", help="comma list of keys in order: priority,name,text")
+    ap.add_argument("--sort-actions", default="priority,name,text", help="comma list: priority,name,text (order matters)")
     args = ap.parse_args()
 
-    log_path = Path(args.logs-dir) / f"notes-{args.date}.md"
+    # BUGFIX: use args.logs_dir (underscore), not args.logs-dir
+    log_path = Path(args.logs_dir) / f"notes-{args.date}.md"
     if not log_path.exists():
-        # still write a minimal file so the workflow can upload it
         title = args.title or f"Team Digest ({args.date})"
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         io.open(args.output, "w", encoding="utf-8").write(f"# {title}\n\n_No log for {args.date} in {args.logs_dir}_\n")
@@ -155,7 +150,6 @@ def main():
     actions_block = secs.get("Actions", "")
     bullets = collect_bullets(actions_block)
     if not bullets and actions_block:
-        # fallback if priorities present
         lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
         if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
             bullets = lines
@@ -181,7 +175,6 @@ def main():
     # render
     title = args.title or f"Team Digest ({args.date})"
     out = [f"# {title}", ""]
-    # no range line for daily to keep it clean
 
     def emit_block(name: str):
         items = [x for x in collected[name] if x]
