@@ -14,30 +14,23 @@ from pathlib import Path
 
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 
-# priority ranks: lower = higher priority
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
-P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}  # map pN -> label
+P_EQUIV = {"p0": "high", "p1": "medium", "p2": "low"}
 
-# Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
     r'^[\s\u00A0]*('
-    r'(?:[-*+])|'              # -, *, +
-    r'(?:\d+[.)])|'            # 1. or 1)
-    r'(?:\[[ xX\-]\])|'        # [ ], [x], [-]
-    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'  # • ‣ ⁃ ∙ ▪ ▫ ● ◦ – —
+    r'(?:[-*+])|'
+    r'(?:\d+[.)])|'
+    r'(?:\[[ xX\-]\])|'
+    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'
     r')\s+',
     re.M
 )
-
-# Same as BULLET_RE but allows optional leading backslash (escaped bullets in logs)
 LEAD_TOKEN_RE = re.compile(
     r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+'
 )
-
-# tolerant header locator
 HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
 
-# fix common mojibake from mis-decoding
 MOJIBAKE_FIXES = {
     "â€“": "–", "â€”": "—", "â€˜": "‘", "â€™": "’",
     "â€œ": "“", "â€\x9d": "”", "â€¢": "•",
@@ -91,7 +84,7 @@ def normalize_block_text(block: str) -> str:
         return ""
     lines = []
     for ln in fix_mojibake(block).splitlines():
-        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)  # drop leading backslash before a bullet
+        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)
         lines.append(ln)
     return "\n".join(lines).strip()
 
@@ -100,18 +93,13 @@ def detect_priority(line: str):
     if m:
         tag = m.group(1).lower()
         label = P_EQUIV.get(tag, tag)
-        return label, PRIORITY_RANK.get(label, 3)
+        return label, {"high":0,"medium":1,"low":2}.get(label, 3)
     return "other", 3
 
-# --- simple "name" extractor for secondary sort ---
-# Tries patterns like:
-#   - [high] Alex to ...
-#   - [p1] Priya – ...
-#   - ... (owner: Anuraj Deol)
 NAME_PATTERNS = [
-    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),            # ] Alex to
-    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),        # ] Priya — ...
-    re.compile(r"\(owner:\s*([^)]+?)\)", re.I),                   # (owner: Name)
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),
+    re.compile(r"\(owner:\s*([^)]+?)\)", re.I),
 ]
 def extract_name(text: str) -> str:
     for rx in NAME_PATTERNS:
@@ -120,6 +108,10 @@ def extract_name(text: str) -> str:
             return m.group(1).strip()
     m = re.search(r"\b([A-Z][a-zA-Z.\-]+(?:\s+[A-Z][a-zA-Z.\-]+)?)\b", text)
     return m.group(1) if m else ""
+
+# NEW: strip any leading priority tag so we don't duplicate labels
+def strip_priority_tag(s: str) -> str:
+    return re.sub(r'^\s*\[(?:high|medium|low|p0|p1|p2)\]\s*', '', s, flags=re.I)
 
 def main():
     ap = argparse.ArgumentParser(description="Build a daily digest from a single log file.")
@@ -132,7 +124,7 @@ def main():
     ap.add_argument("--flat-by-name", action="store_true",
                     help="Sort actions globally by name→priority→text (no priority buckets)")
     ap.add_argument("--sort-actions", default="priority,name,text",
-                    help="(ignored in --flat-by-name) comma list for within-bucket sort: priority,name,text")
+                    help="(ignored in --flat-by-name) comma list for within-bucket sort")
     args = ap.parse_args()
 
     log_path = Path(args.logs_dir) / f"notes-{args.date}.md"
@@ -160,7 +152,6 @@ def main():
     actions_block = secs.get("Actions", "")
     bullets = collect_bullets(actions_block)
     if not bullets and actions_block:
-        # fallback if priorities present
         lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
         if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
             bullets = lines
@@ -170,7 +161,7 @@ def main():
         who  = extract_name(text).lower()
         action_items.append((rank, label, who, text))
 
-    # render
+    # rendering
     title = args.title or f"Team Digest ({args.date})"
     out = [f"# {title}", ""]
 
@@ -189,25 +180,29 @@ def main():
     if action_items:
         out.append("## Actions")
         if args.flat_by_name:
-            # Global: name → priority → text
+            # Global: name → priority → text, show ONE standardized tag
             for _, label, who, text in sorted(action_items, key=lambda t: (t[2], t[0], t[3].lower())):
-                out.append(f"- [{label}] {text}")
+                cleaned = strip_priority_tag(text)
+                tag = f"[{label}]" if label != "other" else "[other]"
+                out.append(f"- {tag} {cleaned}")
             out.append("")
         elif args.group_actions:
-            # Bucketed: priority → name → text (within bucket)
+            # Bucketed: priority → name → text; no per-line tag (bucket header implies priority)
             buckets = {"high": [], "medium": [], "low": [], "other": []}
             for rank, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
                 key = label if label in buckets else "other"
-                buckets[key].append(f"- {text}")
+                buckets[key].append(f"- {strip_priority_tag(text)}")
             for head, title_h in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
                 if buckets[head]:
                     out.append(f"### {title_h} priority")
                     out.extend(buckets[head])
                     out.append("")
         else:
-            # Flat but still by priority first (legacy default without grouping)
-            for _, __, ___, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
-                out.append(f"- {text}")
+            # Flat legacy: priority → name → text; show one standardized tag
+            for _, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
+                cleaned = strip_priority_tag(text)
+                tag = f"[{label}]" if label != "other" else "[other]"
+                out.append(f"- {tag} {cleaned}")
             out.append("")
 
     emit_block("Risks")
