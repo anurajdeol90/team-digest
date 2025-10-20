@@ -1,9 +1,9 @@
 name: Weekly Digest
 
 on:
-  workflow_dispatch: {}     # ← keeps the "Run workflow" button
+  workflow_dispatch: {}      # ← keeps the "Run workflow" button
   schedule:
-    - cron: "5 0 * * 1"     # Mondays 00:05 UTC
+    - cron: "5 0 * * 1"      # Mondays 00:05 UTC
 
 jobs:
   weekly:
@@ -27,18 +27,15 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps (if any)
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Compute previous Monday..Sunday (UTC)
         id: daterange
         shell: bash
         run: |
-          # Previous full Monday..Sunday window in UTC.
           DOW=$(date -u +%u)            # 1..7 (Mon..Sun)
           THIS_MON=$(date -u -d "last monday" +%Y-%m-%d)
           if [ "$DOW" = "1" ]; then
-            # If today is Monday, "last monday" is today → push back 7 days
             THIS_MON=$(date -u -d "$THIS_MON -7 days" +%Y-%m-%d)
           fi
           THIS_SUN=$(date -u -d "$THIS_MON +6 days" +%Y-%m-%d)
@@ -59,37 +56,10 @@ jobs:
           ls -la "$LOGS_DIR" || true
 
       - name: Diagnostics — match notes by filename date (robust)
-        shell: bash
         env:
           START: ${{ steps.daterange.outputs.start }}
           END:   ${{ steps.daterange.outputs.end }}
-          INPUT_DIR: ${{ env.LOGS_DIR }}
-        run: |
-          python - <<'PY'
-import os, re, sys, glob, datetime as dt
-inp = os.environ.get("INPUT_DIR","logs")
-start = dt.date.fromisoformat(os.environ["START"])
-end   = dt.date.fromisoformat(os.environ["END"])
-rx = re.compile(r"notes-(\d{4}-\d{2}-\d{2})\.md$", re.I)
-
-candidates = sorted(glob.glob(os.path.join(inp, "notes-*.md")))
-matches = []
-for p in candidates:
-    m = rx.search(os.path.basename(p))
-    if not m:
-        continue
-    d = dt.date.fromisoformat(m.group(1))
-    if start <= d <= end:
-        matches.append((d.isoformat(), p))
-
-print(f"Matching notes-YYYY-MM-DD.* within {start}..{end} (by filename date):")
-if matches:
-    for d,p in sorted(matches):
-        print(f"  ✓ {d}  -> {p}")
-    print(f"TOTAL MATCHES: {len(matches)}")
-else:
-    print("  (none)")
-PY
+        run: python scripts/diagnose_weekly.py
 
       - name: Aggregate logs → weekly.md (group Actions)
         shell: bash
@@ -127,5 +97,4 @@ PY
 
       - name: Post to Slack (optional)
         if: env.SLACK_WEBHOOK_URL != ''
-        run: |
-          python scripts/post_to_slack.py "$OUTFILE"
+        run: python scripts/post_to_slack.py "$OUTFILE"
