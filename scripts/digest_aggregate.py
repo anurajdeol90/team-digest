@@ -6,6 +6,17 @@ from pathlib import Path
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 PRIORITY_TAGS = {"high": 0, "medium": 1, "low": 2}
 
+# Accept -, *, +, numeric lists (1. / 1)), checkboxes [-] [ ] [x], Unicode bullets • ‣, en/em dashes – —
+BULLET_RE = re.compile(
+    r'^[\s\u00A0]*('
+    r'(?:[-*+])|'              # -, *, +
+    r'(?:\d+[.)])|'            # 1. or 1)
+    r'(?:\[[ xX\-]\])|'        # [ ], [x], [-]
+    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'  # • ‣ ⁃ ∙ ▪ ▫ ● ◦ – —
+    r')\s+',
+    re.M
+)
+
 def parse_args():
     p = argparse.ArgumentParser(description="Aggregate logs into a digest.")
     p.add_argument("--logs-dir", default="logs")
@@ -18,7 +29,6 @@ def parse_args():
     return p.parse_args()
 
 # Accept ##..######, any case, optional punctuation/text after section name
-# Examples: "## Summary", "### Summary:", "## Summary — week 42", "## SUMMARY -"
 def read_sections(text: str) -> dict:
     secs = {}
     text = text.replace("\r\n", "\n")
@@ -43,12 +53,14 @@ def daterange(start: dt.date, end: dt.date):
 def collect_bullets(block: str):
     if not block:
         return []
-    items = []
+    out = []
     for ln in block.splitlines():
-        s = ln.strip()
-        if s.startswith("-") or s.startswith("*"):
-            items.append(s)
-    return items
+        s = ln.rstrip()
+        if not s.strip():
+            continue
+        if BULLET_RE.match(s):
+            out.append(s.strip())
+    return out
 
 def detect_priority(line: str):
     for tag, rank in PRIORITY_TAGS.items():
@@ -73,14 +85,26 @@ def main():
         matched.append(p.as_posix())
         t = io.open(p, "r", encoding="utf-8").read()
         secs = read_sections(t)
+
+        # collect narrative sections
         for k in ["Summary", "Decisions", "Risks", "Dependencies", "Notes"]:
             if secs.get(k):
                 acc[k].append(secs[k].strip())
-        for line in collect_bullets(secs.get("Actions", "")):
+
+        # collect actions
+        actions_block = secs.get("Actions", "")
+        bullets = collect_bullets(actions_block)
+
+        # Fallback: if no bullets but there are priority tags, treat each non-empty line as an action
+        if not bullets and actions_block:
+            lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
+            if any(re.search(r"\[(?:high|medium|low)\]", L, re.I) for L in lines):
+                bullets = lines
+
+        for line in bullets:
             tag, rank = detect_priority(line)
             action_items.append((rank, tag or "", line))
 
-    # Stay strict only if no files matched AND strict mode
     if not matched and not a.expect_missing:
         sys.stderr.write(f"[weekly] No log files matched {start}..{end} in {logs_dir}\n")
         sys.exit(2)
@@ -115,7 +139,9 @@ def main():
                 key = (tag or "other").lower()
                 if key not in buckets:
                     key = "other"
-                buckets[key].append(line)
+                # strip leading bullet tokens when rendering
+                clean = BULLET_RE.sub("", line).strip()
+                buckets[key].append(f"- {clean}")
             for head in ["high", "medium", "low", "other"]:
                 if not buckets[head]:
                     continue
@@ -125,7 +151,8 @@ def main():
                 out.append("")
         else:
             for _, __, line in sorted(action_items, key=lambda t: (t[0], t[2])):
-                out.append(line)
+                clean = BULLET_RE.sub("", line).strip()
+                out.append(f"- {clean}")
             out.append("")
     else:
         out.append("_No actions._")

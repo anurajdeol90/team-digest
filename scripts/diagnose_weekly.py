@@ -3,8 +3,17 @@
 import os, re, glob, datetime as dt, sys, pathlib
 
 SECTIONS = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
-HDR = re.compile(r"^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$", re.M)  # tolerant heading grabber
-A_BUL = re.compile(r"^[ \t]*[-*]\s+", re.M)
+HDR = re.compile(r"^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$", re.M)
+
+BULLET_RE = re.compile(
+    r'^[\s\u00A0]*('
+    r'(?:[-*+])|'
+    r'(?:\d+[.)])|'
+    r'(?:\[[ xX\-]\])|'
+    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'
+    r')\s+',
+    re.M
+)
 PRI = {
     "high": re.compile(r"\[high\]", re.I),
     "medium": re.compile(r"\[medium\]", re.I),
@@ -55,32 +64,37 @@ def main():
             print("  ! could not read:", e)
             continue
 
-        # Which headings are present (tolerant)
+        # Which headings are present
         found_map = {s: False for s in SECTIONS}
         for m in HDR.finditer(txt):
             raw = m.group(1).strip()
-            base = raw.split()[0].rstrip(":-—–")  # tolerate trailing punctuation/dashes
+            base = raw.split()[0].rstrip(":-—–")
             for s in SECTIONS:
                 if base.lower() == s.lower():
                     found_map[s] = True
 
-        # Count actions + priorities (if Actions exists)
-        acts = "n/a"
+        # Actions block + bullet/priority counts
+        acts_info = "n/a"
         if found_map["Actions"]:
             hdr_pat = re.compile(r"^[ \t]*#{2,6}\s*Actions\b.*$", re.M | re.I)
             m = hdr_pat.search(txt)
             if m:
                 nxt = re.search(r"^[ \t]*#{2,6}\s+\S", txt[m.end():], re.M)
                 body = txt[m.end(): m.end()+nxt.start()] if nxt else txt[m.end():]
-                bullets = A_BUL.findall(body)
+                bullets = [ln for ln in body.splitlines() if BULLET_RE.match(ln)]
                 n = len(bullets)
                 hi = sum(1 for line in body.splitlines() if PRI["high"].search(line))
                 me = sum(1 for line in body.splitlines() if PRI["medium"].search(line))
                 lo = sum(1 for line in body.splitlines() if PRI["low"].search(line))
-                acts = f"{n} bullets (high:{hi}, medium:{me}, low:{lo})"
+                # Fallback visibility (like aggregator)
+                if n == 0 and (hi or me or lo):
+                    n = sum(1 for L in body.splitlines() if L.strip())
+                    acts_info = f"{n} lines (fallback; high:{hi}, medium:{me}, low:{lo})"
+                else:
+                    acts_info = f"{n} bullets (high:{hi}, medium:{me}, low:{lo})"
 
         print("  Sections found:", ", ".join([s for s,v in found_map.items() if v]) or "(none)")
-        print("  Actions:", acts)
+        print("  Actions:", acts_info)
 
 if __name__ == "__main__":
     main()
