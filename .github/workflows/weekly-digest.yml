@@ -2,7 +2,7 @@ name: Weekly Digest
 
 on:
   schedule:
-    - cron: "0 8 * * 1"  # Mondays at 08:00 (uses TZ below)
+    - cron: "0 8 * * 1"   # Mondays at 08:00 (uses TZ below)
   workflow_dispatch:
     inputs:
       input_dir:
@@ -19,7 +19,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}   # e.g. "America/Chicago" or "UTC"
+      TZ: ${{ vars.DIGEST_TZ || 'UTC' }}
 
     steps:
       - name: Checkout
@@ -37,7 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "team-digest>=1.1.6,<2"
 
-      # ---------- Resolve INPUT_DIR (override → repo var → logs/) ----------
+      # ---------- Resolve INPUT_DIR safely (no heredocs) ----------
       - name: Resolve INPUT_DIR (override → repo var → logs/)
         id: resolve
         shell: bash
@@ -49,21 +49,20 @@ jobs:
           fi
           [ -z "${CANDIDATE:-}" ] && CANDIDATE="logs"
 
-          # Expand literal $GITHUB_WORKSPACE if user typed it
+          # Expand literal $GITHUB_WORKSPACE if the user typed it
           case "$CANDIDATE" in
             '$GITHUB_WORKSPACE'/*) CANDIDATE="${GITHUB_WORKSPACE}${CANDIDATE#\$GITHUB_WORKSPACE}";;
           esac
 
-          # Make relative paths repo-relative
+          # If relative, make it repo-relative
           if [[ "$CANDIDATE" != /* ]]; then
             CANDIDATE="${GITHUB_WORKSPACE%/}/$CANDIDATE"
           fi
 
-          echo "Resolved INPUT_DIR=$CANDIDATE"
-          printf 'INPUT_DIR=%s\n' "$CANDIDATE" >> "$GITHUB_ENV"
+          echo "INPUT_DIR=$CANDIDATE" | tee -a "$GITHUB_ENV"
 
       # ---------- Week window (Mon..Sun) ----------
-      - name: Compute week window (Mon..Sun) — Bash only
+      - name: Compute week window (Mon..Sun)
         shell: bash
         env:
           WEEK_SCOPE: ${{ github.event.inputs.week_scope || 'last' }}
@@ -81,7 +80,7 @@ jobs:
           echo "TO=$SUN"   | tee -a "$GITHUB_ENV"
           echo "Window: $MON .. $SUN"
 
-      # ---------- Diagnostics so we can see what's actually checked out ----------
+      # ---------- Diagnostics ----------
       - name: Diagnostics — repo & logs presence
         shell: bash
         run: |
@@ -89,20 +88,17 @@ jobs:
           echo "pwd=$(pwd)"
           echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
           echo
-          echo "Repo root (depth 2):"
-          find . -maxdepth 2 -type d -printf '%p\n' | sort
-          echo
           echo "Tracked files under logs/ (git):"
           git ls-files logs || true
           echo
-          echo "List INPUT_DIR content:"
+          echo "INPUT_DIR content:"
           if [ -d "$INPUT_DIR" ]; then
             ls -la "$INPUT_DIR" || true
           else
             echo "(INPUT_DIR does not exist)"
           fi
 
-      # ---------- Normalize note files and retime mtime by filename date ----------
+      # ---------- Normalize files (safe) ----------
       - name: Normalize / retime logs (safe edits)
         shell: bash
         run: |
@@ -111,9 +107,7 @@ jobs:
           for f in "$INPUT_DIR"/notes-????-??-??.*; do
             base="$(basename "$f")"
             datepart="${base#notes-}"; datepart="${datepart%%.*}"
-            # Stamp mtime to noon UTC to avoid DST edges
             touch -m -d "${datepart} 12:00:00" "$f" || true
-            # Normalize newlines/bullets/escapes/smart dashes
             sed -i \
               -e 's/\r$//' \
               -e 's/•\t/- /g' \
@@ -126,7 +120,6 @@ jobs:
               "$f" || true
           done
 
-      # ---------- Filename-date matcher to prove which files fall in the Mon..Sun window ----------
       - name: Diagnostics — match notes by filename date
         shell: bash
         run: |
@@ -139,7 +132,6 @@ jobs:
             name="$(basename "$path")"
             if [[ "$name" =~ ^notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.(md|markdown|txt)$ ]]; then
               d="${BASH_REMATCH[1]}"
-              # String compare works because dates are ISO-8601
               if [[ "$d" >="$FROM" && "$d" <="$TO" ]]; then
                 found+=("$name")
               fi
@@ -162,56 +154,15 @@ jobs:
           echo '---- Preview (first 60 lines) ----'
           head -n 60 outputs/weekly.md || true
 
-      # ---------- Priority-first sort of Actions (high → medium → low → untagged) ----------
+      # ---------- Priority-first sort of Actions ----------
       - name: Sort Actions by priority (high → medium → low → untagged)
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          python - <<'PY'
-import re, io, sys, os
-
-p = "outputs/weekly.md"
-if not os.path.exists(p):
-    sys.exit(0)
-
-t = io.open(p, "r", encoding="utf-8").read()
-
-# Find the "## Actions" section boundaries
-m_start = re.search(r'^##\s*Actions\s*$', t, re.M)
-if not m_start:
-    sys.exit(0)
-start = m_start.end()
-
-m_next = re.search(r'^##\s+\S+', t[start:], re.M)
-end = start + (m_next.start() if m_next else len(t) - start)
-
-block = t[start:end]
-lines = block.splitlines()
-
-# Keep only bullets as sortable; preserve any non-bullets after them
-bullets = [ln for ln in lines if re.match(r'^\s*[-*]\s+', ln)]
-others  = [ln for ln in lines if ln not in bullets]
-
-def prio_key(ln: str):
-    s = ln.lower()
-    if "[high]" in s: return (0, s)
-    if "[medium]" in s: return (1, s)
-    if "[low]" in s: return (2, s)
-    return (3, s)
-
-ordered = sorted(bullets, key=prio_key)
-
-# Rebuild the Actions block
-joined = "\n".join(ordered)
-if ordered and others and others[0].strip():
-    joined += "\n\n" + "\n".join(others)
-elif others:
-    joined += "\n" + "\n".join(others)
-
-new = t[:start] + "\n" + joined.strip("\n") + "\n" + t[end:]
-io.open(p, "w", encoding="utf-8").write(new)
-PY
+          python .github/scripts/sort_actions.py outputs/weekly.md || true
+          echo "---- Actions (post-sort, head) ----"
+          awk 'BEGIN{in=0} /^##[ ]*Actions[ ]*$/ {in=1; print; next} /^##[ ]+/ {in=0} { if(in) print }' outputs/weekly.md | head -n 40 || true
 
       # ---------- Slack (optional) ----------
       - name: Resolve Slack webhook (optional)
