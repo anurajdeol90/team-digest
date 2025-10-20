@@ -1,9 +1,18 @@
 name: Weekly Digest
 
 on:
-  workflow_dispatch: {}        # ← keeps the "Run workflow" button
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Start date (YYYY-MM-DD), optional"
+        required: false
+        type: string
+      end_date:
+        description: "End date inclusive (YYYY-MM-DD), optional"
+        required: false
+        type: string
   schedule:
-    - cron: "5 0 * * 1"        # Mondays 00:05 UTC
+    - cron: "5 0 * * 1"  # Mondays 00:05 UTC
 
 jobs:
   weekly:
@@ -29,19 +38,30 @@ jobs:
       - name: Install deps
         run: python -m pip install --upgrade pip
 
-      - name: Compute previous Monday..Sunday (UTC)
+      - name: Resolve date range (use inputs or last Sunday window)
         id: daterange
         shell: bash
         run: |
-          DOW=$(date -u +%u)            # 1..7 (Mon..Sun)
-          THIS_MON=$(date -u -d "last monday" +%Y-%m-%d)
-          if [ "$DOW" = "1" ]; then
-            THIS_MON=$(date -u -d "$THIS_MON -7 days" +%Y-%m-%d)
+          # If inputs are provided, honor them.
+          IN_START="${{ inputs.start_date }}"
+          IN_END="${{ inputs.end_date }}"
+          if [ -n "$IN_START" ] && [ -n "$IN_END" ]; then
+            START="$IN_START"
+            END="$IN_END"
+          else
+            # Compute last Sunday (UTC) as END, then START=END-6 days.
+            LAST_SUN=$(date -u -d "last sunday" +%Y-%m-%d)
+            # If today is Sunday, "last sunday" is today; use the previous Sunday instead.
+            DOW=$(date -u +%u)  # 1=Mon..7=Sun
+            if [ "$DOW" = "7" ]; then
+              LAST_SUN=$(date -u -d "$LAST_SUN -7 days" +%Y-%m-%d)
+            fi
+            END="$LAST_SUN"
+            START=$(date -u -d "$END -6 days" +%Y-%m-%d)
           fi
-          THIS_SUN=$(date -u -d "$THIS_MON +6 days" +%Y-%m-%d)
-          echo "start=$THIS_MON" >> $GITHUB_OUTPUT
-          echo "end=$THIS_SUN"   >> $GITHUB_OUTPUT
-          echo "Computed weekly window (UTC): $THIS_MON .. $THIS_SUN"
+          echo "start=$START" >> $GITHUB_OUTPUT
+          echo "end=$END"     >> $GITHUB_OUTPUT
+          echo "Resolved weekly window (UTC): $START .. $END"
 
       - name: Diagnostics — repo & logs presence
         shell: bash
