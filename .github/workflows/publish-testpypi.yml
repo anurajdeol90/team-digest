@@ -1,0 +1,50 @@
+name: Publish (TestPyPI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "PEP 440 version to publish (e.g., 0.1.1)"
+        required: true
+        type: string
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Bump version in src (temporary)
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          # Update version in src/team_digest/__init__.py
+          sed -i -E "s/^(__version__\s*=\s*\").*(\")/\1${V}\2/" src/team_digest/__init__.py
+          echo "New __version__:"
+          grep "__version__" src/team_digest/__init__.py || true
+
+      - name: Build sdist/wheel
+        run: python -m build
+
+      - name: Check artifacts
+        run: twine check dist/*
+
+      - name: Upload to TestPyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload --repository-url https://test.pypi.org/legacy/ dist/*
