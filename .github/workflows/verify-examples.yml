@@ -1,0 +1,27 @@
+name: Verify packaged examples (PyPI)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 13 * * 1"  # Mondays at 08:00 AM America/Chicago
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (only for script)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install from PyPI (latest)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade team-digest
+
+      - name: Run packaged examples verification
+        run: |
+          python scripts/ci_verify_examples.py
