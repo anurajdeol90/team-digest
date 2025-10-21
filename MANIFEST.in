@@ -3,3 +3,5 @@ include README.md
 include CHANGELOG.md
 # If you add data files under package later, uncomment and adjust:
 # recursive-include team_digest *.yml *.yaml *.json *.md
+recursive-include src/team_digest/examples *
+
