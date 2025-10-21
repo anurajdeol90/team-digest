@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.13 — 2025-10-21
+### Fixed
+- Align `team_digest.__version__` with installed distribution metadata to prevent version drift.
+
+### Packaging
+- Ensure `src/team_digest/examples/**` (logs, configs, README) are included in wheel and sdist.
+- Added CI workflow to verify packaged examples from PyPI and run daily/weekly/monthly against them.
+
 ## [1.1.12] - 2025-10-21
 ### Added
 - Updated README and CHANGELOG for PyPI distribution.
