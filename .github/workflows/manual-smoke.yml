@@ -1,0 +1,8 @@
+﻿name: Manual Smoke
+on:
+  workflow_dispatch: {}
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Hello from GitHub Actions!"
