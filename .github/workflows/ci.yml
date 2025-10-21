@@ -71,3 +71,10 @@ jobs:
         with:
           name: ci-weekly
           path: outputs/ci_weekly.md
+          
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run unit tests
+        run: pytest -q
+
