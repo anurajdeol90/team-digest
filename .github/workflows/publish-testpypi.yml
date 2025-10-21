@@ -4,15 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "PEP 440 version to publish (e.g., 0.1.1)"
+        description: "PEP 440 version to publish, e.g., 0.2.0a1"
         required: true
         type: string
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    environment: testpypi           # must match TestPyPI 'Environment name'
     permissions:
+      id-token: write               # REQUIRED for OIDC
       contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,29 +25,35 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tools
+      - name: Install build tooling
         run: |
           python -m pip install --upgrade pip
-          pip install build twine
+          pip install build
 
-      - name: Bump version in src (temporary)
+      - name: Bump version (sync __init__ and pyproject if present)
         shell: bash
         run: |
+          set -euo pipefail
           V="${{ inputs.version }}"
-          # Update version in src/team_digest/__init__.py
-          sed -i -E "s/^(__version__\s*=\s*\").*(\")/\1${V}\2/" src/team_digest/__init__.py
-          echo "New __version__:"
-          grep "__version__" src/team_digest/__init__.py || true
 
-      - name: Build sdist/wheel
+          # Update src/team_digest/__init__.py
+          sed -i -E "s/^(__version__\s*=\s*\").*(\")/\1${V}\2/" src/team_digest/__init__.py
+          echo "New __version__ line:"
+          grep -n "__version__" src/team_digest/__init__.py || true
+
+          # Update pyproject.toml only if it carries an explicit version
+          if grep -qE '^\s*version\s*=' pyproject.toml; then
+            sed -i -E "s/^(version\s*=\s*\").*(\")/\1${V}\2/" pyproject.toml
+            echo "pyproject.toml version updated to ${V}"
+          else
+            echo "pyproject.toml has no [project].version; skipping"
+          fi
+
+      - name: Build sdist & wheel
         run: python -m build
 
-      - name: Check artifacts
-        run: twine check dist/*
-
-      - name: Upload to TestPyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        run: |
-          python -m twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+      # ✅ OIDC publish — DO NOT use twine here
+      - name: Upload to TestPyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
