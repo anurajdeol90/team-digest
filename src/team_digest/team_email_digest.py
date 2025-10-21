@@ -1,123 +1,114 @@
-﻿# team_email_digest.py
-# CLI for Team Digest
-# - Correct --version using importlib.metadata (resilient in source/CI)
-# - Stable argparse
-# - Calls generator and can post to Slack via webhook
-
+﻿#!/usr/bin/env python
+# Console entry point for `team-digest`
 from __future__ import annotations
-
-import os
-import argparse
-import sys
+import argparse, datetime as dt, io
 from pathlib import Path
-from datetime import date, datetime
-from typing import Optional
 
-# Resilient version detection: installed metadata or source fallback
-try:
-    from importlib.metadata import version as _pkg_version  # py>=3.8
-except Exception:  # pragma: no cover
-    try:
-        from importlib_metadata import version as _pkg_version  # backport
-    except Exception:
-        _pkg_version = None  # type: ignore
+from .team_digest_runtime import aggregate_range
+from .slack_delivery import post_markdown
 
-if _pkg_version is not None:
-    try:
-        __version__ = _pkg_version("team-digest")
-    except Exception:
-        __version__ = os.environ.get("TEAM_DIGEST_VERSION", "0+source")
-else:
-    __version__ = os.environ.get("TEAM_DIGEST_VERSION", "0+source")
+def write_output(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    io.open(path, "w", encoding="utf-8").write(text)
 
-# Import generator and optional Slack delivery
-from team_digest.team_digest_runtime import generate_digest
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="team-digest",
-        description="Generate a team digest (JSON or Markdown) from logs/notes.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+def cmd_daily(a):
+    logs = Path(a.logs_dir)
+    day  = dt.date.fromisoformat(a.date)
+    md = aggregate_range(
+        logs_dir=logs, start=day, end=day,
+        title=a.title or f"Team Digest ({day.isoformat()})",
+        group_actions=a.group_actions, flat_by_name=a.flat_by_name,
+        emit_kpis=False, owner_breakdown=False
     )
+    write_output(Path(a.output), md)
+    if a.post_to_slack: post_markdown(md)
 
-    # Legacy positional retained to avoid breaking existing users
-    parser.add_argument("path", nargs="?", help="(unused) legacy positional")
-
-    parser.add_argument("--format", choices=("json", "md"), default="json", help="Output format")
-    parser.add_argument("-o", "--output", dest="output", help="Optional output file path. If omitted, prints to stdout.")
-    parser.add_argument("--config", dest="config", help="Optional config file (JSON or YAML).")
-    parser.add_argument("--from", dest="since", metavar="SINCE", help="Include entries from this date (YYYY-MM-DD).")
-    parser.add_argument("--to", dest="until", metavar="UNTIL", help="Include entries until this date (YYYY-MM-DD).")
-    parser.add_argument("--input", dest="input_dir", metavar="INPUT_DIR", help="Input dir or file (default: '-' for stdin).")
-
-    # Delivery options
-    parser.add_argument("--post", choices=("slack",), help="Optional delivery channel for the rendered digest.")
-    parser.add_argument("--slack-webhook", dest="slack_webhook", help="Slack Incoming Webhook URL (or set env SLACK_WEBHOOK).")
-
-    # Correct version flag
-    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}", help="Show version and exit")
-    return parser
-
-
-def _parse_date(value: Optional[str]) -> Optional[date]:
-    if not value:
-        return None
-    return datetime.strptime(value, "%Y-%m-%d").date()
-
-
-def run(
-    *,
-    fmt: str,
-    output: Optional[str],
-    config: Optional[str],
-    since: Optional[str],
-    until: Optional[str],
-    input_dir: Optional[str],
-    legacy_path: Optional[str],
-    post: Optional[str],
-    slack_webhook: Optional[str],
-) -> int:
-    content = generate_digest(
-        fmt=fmt,
-        config_path=config,
-        since=_parse_date(since),
-        until=_parse_date(until),
-        input_dir=input_dir,
+def cmd_weekly(a):
+    logs  = Path(a.logs_dir)
+    start = dt.date.fromisoformat(a.start)
+    end   = dt.date.fromisoformat(a.end)
+    md = aggregate_range(
+        logs_dir=logs, start=start, end=end,
+        title=a.title or f"Team Digest ({start.isoformat()} - {end.isoformat()})",
+        group_actions=a.group_actions, flat_by_name=a.flat_by_name,
+        emit_kpis=a.emit_kpis, owner_breakdown=a.owner_breakdown, owner_top=a.owner_top
     )
+    write_output(Path(a.output), md)
+    if a.post_to_slack: post_markdown(md)
 
-    # Write or print
-    if output:
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(content, encoding="utf-8")
+def cmd_monthly(a):
+    logs = Path(a.logs_dir)
+    if a.year and a.month:
+        start = dt.date(int(a.year), int(a.month), 1)
+        end = (start.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
     else:
-        sys.stdout.write(content if content.endswith("\n") else content + "\n")
+        # month-to-date (UTC) default
+        today = dt.datetime.utcnow().date()
+        start = today.replace(day=1)
+        end   = today
 
-    # Optional delivery
-    if post == "slack":
-        webhook = slack_webhook or os.environ.get("SLACK_WEBHOOK")
-        if not webhook:
-            raise SystemExit("Slack posting requested but no webhook provided. Use --slack-webhook or SLACK_WEBHOOK env.")
-        (__import__("slack_delivery").slack_delivery.post_markdown)(webhook, content)
+    if a.latest_with_data and not (a.year and a.month):
+        months = []
+        for p in logs.glob("notes-*.md"):
+            m = re.search(r"notes-(\d{4}-\d{2})-\d{2}\.md$", p.name)
+            if m: months.append(m.group(1))
+        if months:
+            latest = sorted(set(months))[-1]
+            y, m = latest.split("-")
+            start = dt.date(int(y), int(m), 1)
+            end = (start.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
 
-    return 0
-
-
-def main(argv: Optional[list[str]] = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    return run(
-        fmt=args.format,
-        output=args.output,
-        config=args.config,
-        since=args.since,
-        until=args.until,
-        input_dir=args.input_dir,
-        legacy_path=args.path,
-        post=args.post,
-        slack_webhook=args.slack_webhook,
+    md = aggregate_range(
+        logs_dir=logs, start=start, end=end,
+        title=a.title or f"Team Digest ({start.isoformat()} - {end.isoformat()})",
+        group_actions=a.group_actions, flat_by_name=a.flat_by_name,
+        emit_kpis=True, owner_breakdown=True, owner_top=a.owner_top
     )
+    write_output(Path(a.output), md)
+    if a.post_to_slack: post_markdown(md)
 
+def main(argv=None):
+    import sys, re
+    argv = argv or sys.argv[1:]
+
+    ap = argparse.ArgumentParser(prog="team-digest", description="Generate Daily/Weekly/Monthly digests from logs.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def common(p):
+        p.add_argument("--logs-dir", default="logs")
+        p.add_argument("--title", default="")
+        p.add_argument("--output", required=True)
+        p.add_argument("--group-actions", action="store_true")
+        p.add_argument("--flat-by-name", action="store_true")
+        p.add_argument("--post-to-slack", action="store_true", help="Post the rendered markdown to Slack via SLACK_WEBHOOK_URL")
+
+    # daily
+    p1 = sub.add_parser("daily", help="Build a daily digest for a single date")
+    common(p1)
+    p1.add_argument("--date", default=dt.datetime.utcnow().date().isoformat(), help="YYYY-MM-DD")
+    p1.set_defaults(func=cmd_daily)
+
+    # weekly (generic range)
+    p2 = sub.add_parser("weekly", help="Build a digest for a date range (inclusive)")
+    common(p2)
+    p2.add_argument("--start", required=True, help="YYYY-MM-DD")
+    p2.add_argument("--end", required=True, help="YYYY-MM-DD")
+    p2.add_argument("--emit-kpis", action="store_true")
+    p2.add_argument("--owner-breakdown", action="store_true")
+    p2.add_argument("--owner-top", type=int, default=8)
+    p2.set_defaults(func=cmd_weekly)
+
+    # monthly
+    p3 = sub.add_parser("monthly", help="Build a digest for a calendar month (or month-to-date)")
+    common(p3)
+    p3.add_argument("--year", type=int, help="4-digit year (optional)")
+    p3.add_argument("--month", type=int, help="1-12 (optional)")
+    p3.add_argument("--latest-with-data", action="store_true", dest="latest_with_data")
+    p3.add_argument("--owner-top", type=int, default=8)
+    p3.set_defaults(func=cmd_monthly)
+
+    args = ap.parse_args(argv)
+    return args.func(args)
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
