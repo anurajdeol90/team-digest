@@ -1,0 +1,4 @@
+logs_dir: logs
+output: outputs/daily.md
+group_actions: true
+date: 2025-10-17

@@ -1,0 +1,5 @@
+logs_dir: logs
+output: outputs/monthly.md
+group_actions: true
+emit_kpis: true
+owner_breakdown: true
