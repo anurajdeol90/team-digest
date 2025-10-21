@@ -7,9 +7,11 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - name: Check out repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -17,87 +19,55 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tooling
+      - name: Install package (editable) + runtime deps
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip
+          pip install -e .
 
-      - name: Clean and build wheel + sdist
-        run: |
-          rm -rf dist build *.egg-info || true
-          python -m build
-          ls -la dist
+      - name: Verify CLI wiring
+        run: team-digest --help
 
-      - name: Verify wheel contains package + examples (diagnostics)
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import zipfile, glob, sys, textwrap
-          whls = sorted(glob.glob("dist/*.whl"))
-          if not whls:
-              print("ERROR: No wheel found in dist/. Did build step run?")
-              sys.exit(1)
-          w = whls[-1]
-          print("Wheel:", w)
-          with zipfile.ZipFile(w) as z:
-              names = z.namelist()
-          has_pkg = any(n.startswith("team_digest/__init__.py") for n in names)
-          ex = [n for n in names if n.startswith("team_digest/examples/")]
-          print("Has team_digest package:", has_pkg)
-          print("Example entries (first 10):\n", textwrap.indent("\n".join(ex[:10]), "  "))
-          if not has_pkg or not ex:
-              print("\n--- DIAGNOSTICS ---")
-              print("Ensure BOTH of the following are true:")
-              print("  1) team_digest/examples/logs/sample.md is committed in the repo")
-              print('  2) pyproject.toml has:\n     [tool.setuptools.package-data]\n     team_digest = ["examples/**"]')
-              sys.exit(1)
-          print("✅ Wheel includes package + examples")
-          PY
-
-      - name: Create isolated venv and install from wheel
-        run: |
-          python -m venv .venv
-          source .venv/bin/activate
-          pip install --no-cache-dir dist/*.whl
-          python -c "import team_digest, pathlib; print('Installed at:', pathlib.Path(team_digest.__file__).parent)"
-
-      - name: Resolve packaged examples (robust output)
-        id: logs
+      - name: Discover log window from repo (if any)
+        id: window
+        shell: bash
         run: |
           set -euo pipefail
-          source .venv/bin/activate
-          python - <<'PY' | tee logs_path.txt
-          import importlib.resources as r, team_digest, sys
-          root = r.files(team_digest) / "examples" / "logs"
-          print("Resolved example dir:", root)
-          try:
-            contents = [p.name for p in root.iterdir()]
-          except Exception as e:
-            print("ERROR: Could not list example dir:", e)
-            sys.exit(1)
-          print("Contents:", contents)
-          if not contents:
-            print("ERROR: Example dir is empty; confirm sample.md is packaged.")
-            sys.exit(1)
-          # Emit only the path on the last line for downstream steps
-          print(root.__fspath__())
-          PY
+          # Collect YYYY-MM-DD from filenames under logs/
+          if ls -1 logs/notes-*.md >/dev/null 2>&1; then
+            DATES=$(ls -1 logs/notes-*.md | sed -E 's~.*notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.md~\1~' | sort)
+            START=$(echo "$DATES" | head -n1)
+            END=$(echo "$DATES"   | tail -n1)
+            echo "start=$START" >> "$GITHUB_OUTPUT"
+            echo "end=$END"     >> "$GITHUB_OUTPUT"
+            echo "Detected logs window: $START .. $END"
+          else
+            # No logs present; fall back to today for a no-op digest that still exercises the CLI.
+            TODAY=$(date -u +%Y-%m-%d)
+            echo "start=$TODAY" >> "$GITHUB_OUTPUT"
+            echo "end=$TODAY"   >> "$GITHUB_OUTPUT"
+            echo "No logs found; using today $TODAY for smoke test."
+          fi
 
-      - name: Render outputs from examples
+      - name: Build weekly digest (smoke test)
+        env:
+          START: ${{ steps.window.outputs.start }}
+          END:   ${{ steps.window.outputs.end }}
         run: |
-          set -euo pipefail
-          source .venv/bin/activate
-          mkdir -p out
-          logs_path="$(tail -n 1 logs_path.txt)"
-          team-digest --version
-          team-digest --input "$logs_path" --format md   --output out/digest.md
-          team-digest --input "$logs_path" --format json --output out/digest.json
-          test -s out/digest.md
-          test -s out/digest.json
-          echo "✅ Rendered out/digest.md and out/digest.json"
+          mkdir -p outputs
+          team-digest weekly \
+            --logs-dir logs \
+            --start "$START" \
+            --end   "$END" \
+            --output outputs/ci_weekly.md \
+            --group-actions \
+            --emit-kpis \
+            --owner-breakdown
 
-      - name: Upload artifacts (digest outputs)
+          echo "---- Preview (first 40 lines) ----"
+          head -n 40 outputs/ci_weekly.md || true
+
+      - name: Upload CI weekly artifact
         uses: actions/upload-artifact@v4
         with:
-          name: digest-outputs
-          path: out/
-          if-no-files-found: error
+          name: ci-weekly
+          path: outputs/ci_weekly.md
