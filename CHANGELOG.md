@@ -1,29 +1,41 @@
 # Changelog
-All notable changes will be documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to this project will be documented in this file.
 
-## [1.1.11] - 2025-10-21
+## [1.1.12] - 2025-10-21
 ### Added
-- Trusted Publisher support for PyPI release.
-- CLI: `daily`, `weekly`, and `monthly` commands stable.
-- Executive KPIs + Owner breakdown in monthly digest.
+- Updated README and CHANGELOG for PyPI distribution.
+- Enhanced monthly digest with Executive KPIs and Owner breakdown.
 
 ### Fixed
-- Weekly digest stable with grouped Actions and proper window handling.
-- Daily digest date mismatch fixed.
-- Removed duplicate priorities in Actions.
+- Corrected CLI entrypoint usage (`team-digest daily|weekly|monthly`).
+- Removed duplicate priority labels in Actions section.
 
-## [1.1.10] - 2025-10-20
+## [1.1.11] - 2025-10-20
 ### Added
-- Slack integration tested.
-- GitHub Actions workflows: daily, weekly, monthly.
+- Trusted Publisher configuration for PyPI release workflow.
+- Daily, Weekly, and Monthly digests stabilized with correct date windows.
 
-## [1.1.4] - 2025-10-18
-### Changed
-- Repo cleaned up for customer-ready release.
-- Normalized daily digest header to single date.
+### Fixed
+- Weekly digest date window to align with calendar week (Mon–Sun).
+- Correct Slack posting integration for digests.
 
-## [0.1.x] - Initial Development
-- Basic parsing of logs from `/logs/notes-YYYY-MM-DD.md`.
+## [1.1.10] - 2025-10-19
+### Added
+- Support for grouping Actions by priority or flat sorting by name>priority.
+- Monthly digest initial implementation.
+
+### Fixed
+- Robust matcher for parsing log sections and actions.
+
+## [1.1.9] - 2025-10-17
+### Added
+- Diagnostics scripts for weekly digest window and actions parsing.
+
+## [1.1.8] - 2025-10-16
+### Fixed
+- Workflow buttons restored by correcting YAML syntax in GitHub Actions.
+
+## [1.1.7] - 2025-10-15
+### Added
+- Sample logs and outputs included in package for testing.
