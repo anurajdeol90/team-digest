@@ -92,7 +92,11 @@ print(list(logs.rglob("*.md")))
 Set your webhook URL:
 
 ```bash
+# Linux / macOS
 export SLACK_WEBHOOK="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+# Windows PowerShell
+$env:SLACK_WEBHOOK="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+
 ```
 
 Post a weekly digest:
