@@ -22,6 +22,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade team-digest
+          
+      - name: Smoke: team-digest init
+        run: |
+            team-digest init --to .
+            test -d examples/logs
+            test -f examples/logs/notes-2025-10-17.md
+
 
       - name: Verify packaged examples and CLI
         run: |
