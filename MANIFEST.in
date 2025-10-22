@@ -1,7 +1,15 @@
-﻿include LICENSE
+﻿# Include root docs in the source distribution (sdist)
 include README.md
 include USAGE.md
-include CHANGELOG.md
-# If you add data files under package later, uncomment and adjust:
-# recursive-include team_digest *.yml *.yaml *.json *.md
+include LICENSE
+
+# Include the examples folder in sdist
 recursive-include src/team_digest/examples *
+
+# Exclude local/dev clutter from sdist
+prune .venv
+prune .venv-test
+prune outputs
+exclude *.pyc
+exclude *.pyo
+exclude __pycache__/

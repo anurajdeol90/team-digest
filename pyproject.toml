@@ -1,22 +1,17 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "team-digest"
-version = "1.1.13"
-description = "Generate daily/weekly/monthly team email digests and deliver to Slack."
-readme = "README.md"
-license = "MIT"
+# We read version from the package (__init__.__version__)
+dynamic = ["version", "readme"]
+description = "Generate daily/weekly/monthly team digests from Markdown logs; optional Slack posting."
 requires-python = ">=3.9"
-authors = [
-  { name = "Anuraj Deol" }
-]
-keywords = ["digest", "email", "slack", "automation", "team", "reports"]
+authors = [{ name = "Anuraj Deol" }]
+license = { file = "LICENSE" }
+keywords = ["digest", "email", "slack", "automation", "markdown", "teams"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
-  "Intended Audience :: Information Technology",
-  "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.9",
@@ -24,9 +19,11 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Topic :: Communications :: Email",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Information Technology",
   "Topic :: Office/Business",
-  "Topic :: Software Development :: Build Tools"
+  "Topic :: Utilities",
 ]
 
 dependencies = [
@@ -37,27 +34,34 @@ dependencies = [
   "tqdm>=4,<5",
 ]
 
+[project.urls]
+Homepage = "https://github.com/AnurajDeol1990/team-digest"
+Repository = "https://github.com/AnurajDeol1990/team-digest"
+Issues = "https://github.com/AnurajDeol1990/team-digest/issues"
+
 [project.scripts]
 team-digest = "team_digest.team_email_digest:main"
 
-# Optional project URLs (uncomment & set if you want these to show on PyPI)
-# [project.urls]
-# Homepage = "https://your-site-or-repo"
-# Documentation = "https://your-docs"
-# Source = "https://github.com/your-org/team-digest"
-# Issues = "https://github.com/your-org/team-digest/issues"
+# --- Dynamic fields ---
+[tool.setuptools.dynamic]
+# Use the root README.md for PyPI long description
+readme = { file = ["README.md"], content-type = "text/markdown" }
+# Pull version from team_digest.__init__.__version__
+version = { attr = "team_digest.__init__.__version__" }
 
+# --- Package discovery & data ---
 [tool.setuptools]
-include-package-data = true
 package-dir = { "" = "src" }
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["team_digest*"]
 
+# Ship example assets inside the package
 [tool.setuptools.package-data]
-"team_digest" = ["examples/**", "../USAGE.md"]
+team_digest = ["examples/**"]
 
-[project.urls]
-Homepage = "https://github.com/anurajdeol90/team-digest"
-Issues = "https://github.com/anurajdeol90/team-digest/issues"
+# Ship top-level docs alongside the installation (non-package data).
+# These will be installed under: <prefix>/share/team-digest/
+[tool.setuptools.data-files]
+"share/team-digest" = ["README.md", "USAGE.md", "LICENSE"]
