@@ -4,17 +4,15 @@ from __future__ import annotations
 import argparse
 import dataclasses as dc
 import datetime as dt
-import io
 import json
 import os
 import re
-import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 # External (declared in pyproject)
-import regex as rxx
+import regex as rxx  # drop-in replacement for 're' with better features
 import requests
 try:
     import yaml  # type: ignore
@@ -43,7 +41,7 @@ OWNER_RX    = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+to\b")
 class DayDoc:
     date: dt.date
     path: Path
-    sections: Dict[str, List[str]]  # section -> lines (raw, no bullets removed yet)
+    sections: Dict[str, List[str]]  # section -> lines
 
 @dc.dataclass
 class Actions:
@@ -70,30 +68,22 @@ def load_config(fp: Optional[str]) -> Dict:
 # --------- Markdown parsing ---------
 
 def split_sections(md: str) -> Dict[str, List[str]]:
-    """
-    Return mapping of section -> list of lines (without the section header itself).
-    Recognizes H2/H3 headers for known sections.
-    """
-    pos = 0
-    found: List[Tuple[str, int, int]] = []
+    """Return mapping of section -> list of lines (without the section header)."""
+    anchors = []
     for m in SECTION_RX.finditer(md):
         hdr = m.group(2).strip()
-        start = m.end()
-        found.append((hdr, m.start(), start))
-    # Append a sentinel end
-    spans = []
-    for i, (name, hdr_start, content_start) in enumerate(found):
-        content_end = found[i + 1][1] if i + 1 < len(found) else len(md)
+        anchors.append((hdr, m.start(), m.end()))
+    out: Dict[str, List[str]] = {}
+    for i, (name, hdr_start, content_start) in enumerate(anchors):
+        content_end = anchors[i + 1][1] if i + 1 < len(anchors) else len(md)
         body = md[content_start:content_end]
+        # Keep non-empty lines; we preserve bullets where present
         lines = [ln.rstrip() for ln in body.splitlines() if ln.strip() != ""]
-        spans.append((name, lines))
-    return {k: v for k, v in spans}
+        out[name] = lines
+    return out
 
 def parse_actions(lines: List[str]) -> Actions:
-    """
-    Extract bullet lines & categorize by [high]/[medium]/[low] tag,
-    fall back to 'unknown' if no tag found.
-    """
+    """Extract bullet lines and categorize by [high]/[medium]/[low]."""
     acts = Actions()
     for ln in lines:
         m = BULLET_RX.search(ln)
@@ -162,16 +152,13 @@ def aggregate_sections(daydocs: List[DayDoc]) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {k: [] for k in ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]}
     for d in sorted(daydocs, key=lambda x: x.date):
         for sec in out.keys():
-            lines = d.sections.get(sec, [])
-            # Keep bullets (for Actions especially); preserve line granularity
-            out[sec].extend(lines)
+            out[sec].extend(d.sections.get(sec, []))
     return out
 
 def aggregate_actions(daydocs: List[DayDoc]) -> Actions:
     acts = Actions()
     for d in daydocs:
-        lines = d.sections.get("Actions", [])
-        a = parse_actions(lines)
+        a = parse_actions(d.sections.get("Actions", []))
         acts.high.extend(a.high)
         acts.medium.extend(a.medium)
         acts.low.extend(a.low)
@@ -190,7 +177,6 @@ def kpis_block(daydocs: List[DayDoc], acts: Actions) -> str:
     owners_c.update(detect_owners(acts.unknown))
     owners = len(owners_c)
     days_with_notes = len(daydocs)
-
     total_actions = len(acts.high) + len(acts.medium) + len(acts.low) + len(acts.unknown)
 
     lines = []
@@ -201,7 +187,6 @@ def kpis_block(daydocs: List[DayDoc], acts: Actions) -> str:
     return "\n".join(lines)
 
 def owner_breakdown_table(acts: Actions, top_n: int = 9999) -> str:
-    # Count by owner + priority
     table: Dict[str, Counter] = defaultdict(Counter)
     for prio, lst in (("High", acts.high), ("Medium", acts.medium), ("Low", acts.low), ("Unknown", acts.unknown)):
         for item in lst:
@@ -210,7 +195,6 @@ def owner_breakdown_table(acts: Actions, top_n: int = 9999) -> str:
             table[owner][prio] += 1
             table[owner]["Total"] += 1
 
-    # Sort by Total desc, then owner asc
     rows = sorted(table.items(), key=lambda kv: (-kv[1]["Total"], kv[0]))[:top_n]
 
     lines = []
@@ -222,7 +206,6 @@ def owner_breakdown_table(acts: Actions, top_n: int = 9999) -> str:
     return "\n".join(lines)
 
 def ensure_nonempty(block_title: str, lines: List[str]) -> str:
-    # If no bullets detected, fallback to "_No ..._"
     if not any(BULLET_RX.search(ln) for ln in lines):
         return f"## {block_title}\n_No {block_title.lower()}._"
     return "## " + block_title + "\n" + "\n".join(lines)
@@ -234,7 +217,6 @@ def render_daily(title: str, day: DayDoc, group_actions: bool) -> str:
     out.append(ensure_nonempty("Summary", secs.get("Summary", [])))
     out.append(ensure_nonempty("Decisions", secs.get("Decisions", [])))
 
-    # Actions (optionally grouped)
     out.append("## Actions")
     if group_actions:
         if acts.high:
@@ -246,17 +228,13 @@ def render_daily(title: str, day: DayDoc, group_actions: bool) -> str:
         if acts.low:
             out.append("### Low priority")
             out.extend([f"- {t}" for t in acts.low])
-        # If unknown exist and we want to show them:
         if acts.unknown:
             out.append("### Unclassified")
             out.extend([f"- {t}" for t in acts.unknown])
         if not (acts.high or acts.medium or acts.low or acts.unknown):
             out.append("_No actions._")
     else:
-        if any(BULLET_RX.search(ln) for ln in secs.get("Actions", [])):
-            out.extend(secs.get("Actions", []))
-        else:
-            out.append("_No actions._")
+        out.extend(secs.get("Actions", []) or ["_No actions._"])
 
     out.append(ensure_nonempty("Risks", secs.get("Risks", [])))
     out.append(ensure_nonempty("Dependencies", secs.get("Dependencies", [])))
@@ -282,7 +260,6 @@ def render_weekly(title: str, logs_dir: Path, start: dt.date, end: dt.date, dayd
     out.append(ensure_nonempty("Summary", agg.get("Summary", [])))
     out.append(ensure_nonempty("Decisions", agg.get("Decisions", [])))
 
-    # Actions (optionally grouped)
     out.append("## Actions")
     if group_actions:
         if acts.high:
@@ -300,10 +277,7 @@ def render_weekly(title: str, logs_dir: Path, start: dt.date, end: dt.date, dayd
         if not (acts.high or acts.medium or acts.low or acts.unknown):
             out.append("_No actions._")
     else:
-        if any(BULLET_RX.search(ln) for ln in agg.get("Actions", [])):
-            out.extend(agg.get("Actions", []))
-        else:
-            out.append("_No actions._")
+        out.extend(agg.get("Actions", []) or ["_No actions._"])
 
     out.append(ensure_nonempty("Risks", agg.get("Risks", [])))
     out.append(ensure_nonempty("Dependencies", agg.get("Dependencies", [])))
@@ -311,7 +285,6 @@ def render_weekly(title: str, logs_dir: Path, start: dt.date, end: dt.date, dayd
     return "\n\n".join(out)
 
 def render_monthly(title: str, logs_dir: Path, start: dt.date, end: dt.date, daydocs: List[DayDoc], group_actions: bool, emit_kpis: bool, owner_breakdown: bool) -> str:
-    # Month (or month-to-date)
     acts = aggregate_actions(daydocs)
     agg = aggregate_sections(daydocs)
     out: List[str] = []
@@ -342,10 +315,7 @@ def render_monthly(title: str, logs_dir: Path, start: dt.date, end: dt.date, day
         if not (acts.high or acts.medium or acts.low or acts.unknown):
             out.append("_No actions._")
     else:
-        if any(BULLET_RX.search(ln) for ln in agg.get("Actions", [])):
-            out.extend(agg.get("Actions", []))
-        else:
-            out.append("_No actions._")
+        out.extend(agg.get("Actions", []) or ["_No actions._"])
 
     out.append(ensure_nonempty("Risks", agg.get("Risks", [])))
     out.append(ensure_nonempty("Dependencies", agg.get("Dependencies", [])))
@@ -402,7 +372,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def merge_config(args: argparse.Namespace) -> argparse.Namespace:
     cfg = load_config(getattr(args, "config", None))
-    # CLI should override config, so only set if missing
     for key, val in cfg.items():
         if getattr(args, key, None) in (None, False, "", 0):
             setattr(args, key, val)
@@ -428,6 +397,8 @@ def write_output(args: argparse.Namespace, text_md: str, json_obj: Optional[dict
         with open(args.output, "wb") as f:
             f.write(out_bytes)
     else:
+        # stdout path
+        import sys
         sys.stdout.buffer.write(out_bytes)
 
 def cmd_daily(args: argparse.Namespace) -> None:
@@ -466,11 +437,8 @@ def cmd_weekly(args: argparse.Namespace) -> None:
     daydocs = [read_daydoc(p) for p in files]
     title = f"Team Digest ({start.isoformat()} - {end.isoformat()})"
     md = render_weekly(title, logs_dir, start, end, daydocs, args.group_actions, args.emit_kpis, args.owner_breakdown)
-    write_output(args, md, {
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "count": len(daydocs)
-    })
+    write_output(args, md, {"start": start.isoformat(), "end": end.isoformat(), "count": len(daydocs)})
+
     wh = ensure_slack_ok(args)
     if wh:
         post_to_slack(wh, md)
@@ -486,7 +454,6 @@ def _month_range(month_str: Optional[str]) -> Tuple[dt.date, dt.date]:
     else:
         today = dt.date.today()
         start = dt.date(today.year, today.month, 1)
-    # end = end of month OR today (month-to-date)
     next_month = dt.date(start.year + (1 if start.month == 12 else 0),
                          1 if start.month == 12 else start.month + 1, 1)
     end = min(dt.date.today(), next_month - dt.timedelta(days=1))
@@ -500,7 +467,6 @@ def cmd_monthly(args: argparse.Namespace) -> None:
     files = find_range_files(logs_dir, start, end)
 
     if not files and args.latest_with_data:
-        # back up month by month until we find data (max 12 months)
         y, m = start.year, start.month
         for _ in range(12):
             if m == 1:
@@ -519,11 +485,8 @@ def cmd_monthly(args: argparse.Namespace) -> None:
     daydocs = [read_daydoc(p) for p in files]
     title = f"Team Digest ({start.isoformat()} - {end.isoformat()})"
     md = render_monthly(title, logs_dir, start, end, daydocs, args.group_actions, args.emit_kpis, args.owner_breakdown)
-    write_output(args, md, {
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "count": len(daydocs)
-    })
+    write_output(args, md, {"start": start.isoformat(), "end": end.isoformat(), "count": len(daydocs)})
+
     wh = ensure_slack_ok(args)
     if wh:
         post_to_slack(wh, md)
