@@ -56,7 +56,7 @@ where = ["src"]
 include = ["team_digest*"]
 
 [tool.setuptools.package-data]
-team_digest = ["examples/**"]
+"team_digest" = ["examples/**", "../USAGE.md"]
 
 [project.urls]
 Homepage = "https://github.com/anurajdeol90/team-digest"
