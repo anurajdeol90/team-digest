@@ -6,6 +6,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout (for badges only)
         uses: actions/checkout@v4
@@ -28,7 +29,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: verify-examples-digests
-          # Upload everything produced by the script (the script prints OUTDIR path but we don't
-          # parse it here; it's always under $RUNNER_TEMP/td-verify-* so we glob)
-          path: ${{ runner.temp }}/td-verify-*/**
+          path: ${{ env.TD_OUTDIR }}/**
           if-no-files-found: error
