@@ -1,4 +1,4 @@
-name: Verify packaged examples (PyPI)
+name: Verify packaged examples
 
 on:
   workflow_dispatch:
@@ -8,26 +8,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (for badges only)
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install from PyPI
+      - name: Install team-digest from PyPI (pinned)
         run: |
           python -m pip install -U pip
-          python -m pip install -U team-digest
+          pip install -U "team-digest==1.1.14"
 
-      - name: Run packaged examples verification
+      - name: Show installed version
+        run: |
+          python - << 'PY'
+import importlib.metadata as m, team_digest
+print("dist:", m.version("team-digest"))
+print("__version__:", team_digest.__version__)
+PY
+
+      - name: Run verification script
         run: |
           python scripts/ci_verify_examples.py
 
-      - name: Upload digests artifact
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -e
+          OUT="$RUNNER_TEMP/td-out"
+          mkdir -p "$OUT"
+          shopt -s nullglob
+          # copy any generated digests from the temp run dir(s)
+          for p in /tmp/td-verify-*/*.md; do
+            cp "$p" "$OUT"/
+          done
+          echo "Collected files:"
+          ls -la "$OUT" || true
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: verify-examples-digests
-          path: ${{ env.TD_OUTDIR }}/**
-          if-no-files-found: error
+          path: ${{ runner.temp }}/td-out/
