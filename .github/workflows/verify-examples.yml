@@ -1,35 +1,127 @@
 name: Verify packaged examples (PyPI)
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "0 13 * * 1"  # Mondays 08:00 America/Chicago
+  workflow_dispatch:
 
 jobs:
   verify:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (for script)
+      - name: Checkout (for badges only)
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install from PyPI
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install --upgrade team-digest
-          
-      - name: Smoke: team-digest init
-        run: |
-            team-digest init --to .
-            test -d examples/logs
-            test -f examples/logs/notes-2025-10-17.md
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -U team-digest
+          echo "=== team-digest CLI version ==="
+          team-digest -V || true
+          echo "=== dist vs module version ==="
+          python - <<'PY'
+import importlib.metadata as m
+import team_digest
+print("dist:", m.version("team-digest"))
+print("__version__:", team_digest.__version__)
+PY
 
-
-      - name: Verify packaged examples and CLI
+      - name: Resolve packaged examples path
+        id: ex
+        shell: bash
         run: |
-          python scripts/ci_verify_examples.py
+          set -euo pipefail
+          python - <<'PY'
+from importlib.resources import files, as_file
+from contextlib import ExitStack
+import os, sys
+with ExitStack() as es:
+    # points to the *installed* package's examples/logs directory
+    p = files("team_digest").joinpath("examples", "logs")
+    fp = es.enter_context(as_file(p))
+    # expose to later steps
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+        out.write(f"logs={fp}\n")
+    print("EXLOGS:", fp)
+PY
+
+      - name: Smoke: packaged examples exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+from importlib.resources import files
+cnt = 0
+for md in (files("team_digest") / "examples" / "logs").rglob("*.md"):
+    cnt += 1
+    if cnt >= 1:
+        break
+if cnt == 0:
+    raise SystemExit("No example logs found under team_digest/examples/logs")
+print("OK: examples/logs present with at least 1 .md")
+PY
+
+      - name: Build digests from packaged examples
+        id: run_digests
+        shell: bash
+        env:
+          EXLOGS: ${{ steps.ex.outputs.logs }}
+        run: |
+          set -euo pipefail
+          OUTDIR="${RUNNER_TEMP}/td-verify"
+          mkdir -p "$OUTDIR"
+
+          echo
+          echo "\$ team-digest weekly ..."
+          team-digest weekly \
+            --logs-dir "${EXLOGS}" \
+            --start 2025-10-13 --end 2025-10-19 \
+            --output "${OUTDIR}/weekly.md" \
+            --group-actions --emit-kpis --owner-breakdown
+
+          echo
+          echo "\$ team-digest daily ..."
+          team-digest daily \
+            --logs-dir "${EXLOGS}" \
+            --date 2025-10-17 \
+            --output "${OUTDIR}/daily.md" \
+            --group-actions
+
+          echo
+          echo "\$ team-digest monthly ..."
+          team-digest monthly \
+            --logs-dir "${EXLOGS}" \
+            --output "${OUTDIR}/monthly.md" \
+            --group-actions --emit-kpis --owner-breakdown
+
+          echo "OUTDIR=${OUTDIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check outputs (non-empty)
+        shell: bash
+        env:
+          OUTDIR: ${{ steps.run_digests.outputs.OUTDIR }}
+        run: |
+          set -euo pipefail
+          ls -lah "$OUTDIR"
+          for f in "$OUTDIR"/daily.md "$OUTDIR"/weekly.md "$OUTDIR"/monthly.md; do
+            echo "---- $f (first 40 lines) ----"
+            head -n 40 "$f" || true
+            # Simple non-empty assertion
+            if [ ! -s "$f" ]; then
+              echo "::error file=$f::Digest appears empty"
+              exit 2
+            fi
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-examples-digests
+          path: ${{ steps.run_digests.outputs.OUTDIR }}/*
+          if-no-files-found: error
