@@ -1,19 +1,32 @@
 # scripts/ci_verify_examples.py
 import os
 import sys
-import shutil
 import tempfile
 import subprocess as sp
 from contextlib import ExitStack
 from importlib.resources import files, as_file
 
-def run(cmd: str) -> None:
+def run(cmd: str) -> sp.CompletedProcess:
     print("\n$ " + cmd + "\n", flush=True)
-    r = sp.run(cmd, shell=True, text=True)
+    return sp.run(cmd, shell=True, text=True)
+
+def must_run(cmd: str) -> None:
+    r = run(cmd)
     r.check_returncode()
 
+def cmd_supports_flag(cmd: str, flag: str) -> bool:
+    # cmd like: "team-digest monthly"
+    try:
+        r = sp.run(f"{cmd} --help", shell=True, text=True, capture_output=True)
+        if r.returncode != 0:
+            return False
+        text = (r.stdout or "") + (r.stderr or "")
+        return flag in text
+    except Exception:
+        return False
+
 def main() -> None:
-    # Print dist vs module version (no heredocs needed in YAML)
+    # version info (non-fatal)
     try:
         import importlib.metadata as m
         import team_digest
@@ -22,7 +35,7 @@ def main() -> None:
     except Exception as e:
         print("WARNING: could not read versions:", e, file=sys.stderr)
 
-    # Resolve packaged examples/logs to a real filesystem path
+    # resolve packaged examples/logs to a real filesystem path
     with ExitStack() as es:
         p = files("team_digest").joinpath("examples", "logs")
         logs_path = os.fspath(es.enter_context(as_file(p)))
@@ -31,8 +44,8 @@ def main() -> None:
         outdir = tempfile.mkdtemp(prefix="td-verify-")
         print("OUTDIR:", outdir)
 
-        # Weekly
-        run(
+        # WEEKLY — always pass KPIs + owner breakdown (supported in 1.1.13)
+        must_run(
             f'team-digest weekly '
             f'--logs-dir "{logs_path}" '
             f'--start 2025-10-13 --end 2025-10-19 '
@@ -40,8 +53,8 @@ def main() -> None:
             f'--group-actions --emit-kpis --owner-breakdown'
         )
 
-        # Daily
-        run(
+        # DAILY
+        must_run(
             f'team-digest daily '
             f'--logs-dir "{logs_path}" '
             f'--date 2025-10-17 '
@@ -49,13 +62,21 @@ def main() -> None:
             f'--group-actions'
         )
 
-        # Monthly
-        run(
+        # MONTHLY — add flags only if supported by this installed version
+        monthly_cmd = (
             f'team-digest monthly '
             f'--logs-dir "{logs_path}" '
             f'--output "{os.path.join(outdir, "monthly.md")}" '
-            f'--group-actions --emit-kpis --owner-breakdown'
+            f'--group-actions'
         )
+
+        base_cmd = "team-digest monthly"
+        if cmd_supports_flag(base_cmd, "--emit-kpis"):
+            monthly_cmd += " --emit-kpis"
+        if cmd_supports_flag(base_cmd, "--owner-breakdown"):
+            monthly_cmd += " --owner-breakdown"
+
+        must_run(monthly_cmd)
 
         # Sanity checks (non-empty)
         failed = []
@@ -69,7 +90,7 @@ def main() -> None:
             print("ERROR: empty/missing outputs:", failed, file=sys.stderr)
             sys.exit(2)
 
-        # Write the OUTDIR path to a file so workflow can upload it
+        # leave a sentinel file so artifact glob definitely matches the folder
         with open(os.path.join(outdir, "_OK"), "w", encoding="utf-8") as f:
             f.write("ok\n")
 
