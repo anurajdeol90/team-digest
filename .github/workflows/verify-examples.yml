@@ -21,13 +21,9 @@ jobs:
           python -m pip install -U pip
           pip install -U "team-digest==1.1.14"
 
-      - name: Show installed version
+      - name: Show installed version (no heredoc)
         run: |
-          python - << 'PY'
-import importlib.metadata as m, team_digest
-print("dist:", m.version("team-digest"))
-print("__version__:", team_digest.__version__)
-PY
+          python -c "import importlib.metadata as m, team_digest; print('dist:', m.version('team-digest')); print('__version__:', team_digest.__version__)"
 
       - name: Run verification script
         run: |
@@ -40,12 +36,10 @@ PY
           OUT="$RUNNER_TEMP/td-out"
           mkdir -p "$OUT"
           shopt -s nullglob
-          # copy any generated digests from the temp run dir(s)
           for p in /tmp/td-verify-*/*.md; do
             cp "$p" "$OUT"/
           done
-          echo "Collected files:"
-          ls -la "$OUT" || true
+          echo "Collected files:" && ls -la "$OUT" || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
