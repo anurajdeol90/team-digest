@@ -1,0 +1,7 @@
+logs_dir: logs
+output: outputs/weekly.md
+group_actions: true
+emit_kpis: true
+owner_breakdown: true
+start: 2025-10-13
+end: 2025-10-19
