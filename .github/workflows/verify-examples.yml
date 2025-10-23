@@ -29,13 +29,8 @@ jobs:
           OUTDIR="$RUNNER_TEMP/td-verify"
           mkdir -p "$OUTDIR"
 
-          # Resolve packaged example logs inside the installed wheel
-          pyver=$(python - <<'PY'
-import importlib.resources as r
-print(r.files("team_digest") / "examples" / "logs")
-PY
-)
-          EXLOGS="$pyver"
+          # Resolve packaged example logs inside the installed wheel (no heredocs)
+          EXLOGS=$(python -c "from importlib.resources import files; print(files('team_digest')/'examples'/'logs')")
 
           echo "outdir=$OUTDIR" >> "$GITHUB_OUTPUT"
           echo "exlogs=$EXLOGS" >> "$GITHUB_OUTPUT"
@@ -46,11 +41,7 @@ PY
       - name: Show installed version
         shell: bash
         run: |
-          python - <<'PY'
-import importlib.metadata as m, team_digest
-print("dist:", m.version("team-digest"))
-print("__version__:", team_digest.__version__)
-PY
+          python -c "import importlib.metadata as m, team_digest; print('dist:', m.version('team-digest')); print('__version__:', team_digest.__version__)"
 
       - name: Build weekly/daily/monthly from packaged examples
         shell: bash
