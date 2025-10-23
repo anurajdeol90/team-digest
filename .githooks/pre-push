@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Read refs from stdin (lines like "<local_ref> <local_sha> <remote_ref> <remote_sha>")
