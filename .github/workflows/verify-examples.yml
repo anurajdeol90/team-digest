@@ -23,88 +23,17 @@ jobs:
 
       - name: Prepare OUTDIR and copy packaged example logs
         id: prep
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUTDIR="$RUNNER_TEMP/td-verify"
-          EXLOGS="$RUNNER_TEMP/exlogs"
-          mkdir -p "$OUTDIR" "$EXLOGS"
-
-          # Copy the resources INSIDE Python so the as_file() context stays alive.
-          python - <<'PY'
-import os
-from importlib.resources import files, as_file
-from contextlib import ExitStack
-
-OUTDIR = os.environ["RUNNER_TEMP"] + "/td-verify"
-EXLOGS = os.environ["RUNNER_TEMP"] + "/exlogs"
-
-def copy_tree(traversable, dst):
-    os.makedirs(dst, exist_ok=True)
-    for ch in traversable.iterdir():
-        target = os.path.join(dst, ch.name)
-        if ch.is_dir():
-            copy_tree(ch, target)
-        else:
-            with ch.open("rb") as rf, open(target, "wb") as wf:
-                wf.write(rf.read())
-
-es = ExitStack()
-root = files("team_digest") / "examples" / "logs"
-# If the package is zipped, as_file gives us a real path while the context is open.
-with es.enter_context(as_file(root)) as root_path:
-    # Now walk the Traversable (root) and copy its bytes into EXLOGS.
-    # Using the Traversable directly keeps this working both zipped and unzipped.
-    copy_tree(root, EXLOGS)
-
-print("OUTDIR:", OUTDIR)
-print("EXLOGS:", EXLOGS)
-print("Copied:")
-for dirpath, _, filenames in os.walk(EXLOGS):
-    for f in filenames:
-        print(os.path.join(dirpath, f))
-PY
-
-          echo "outdir=$OUTDIR" >> "$GITHUB_OUTPUT"
-          echo "exlogs=$EXLOGS" >> "$GITHUB_OUTPUT"
+        run: python scripts/ci_copy_examples.py
 
       - name: Show installed version
-        shell: bash
         run: |
           python -c "import importlib.metadata as m, team_digest; print('dist:', m.version('team-digest')); print('__version__:', team_digest.__version__)"
 
       - name: Build weekly/daily/monthly from packaged examples
-        shell: bash
         env:
           EXLOGS: ${{ steps.prep.outputs.exlogs }}
           OUTDIR: ${{ steps.prep.outputs.outdir }}
-        run: |
-          set -euxo pipefail
-          echo "EXLOGS=$EXLOGS"
-          echo "OUTDIR=$OUTDIR"
-
-          team-digest weekly \
-            --logs-dir "$EXLOGS" \
-            --start 2025-10-13 --end 2025-10-19 \
-            --output "$OUTDIR/weekly.md" \
-            --group-actions --emit-kpis --owner-breakdown
-          test -s "$OUTDIR/weekly.md"
-
-          team-digest daily \
-            --logs-dir "$EXLOGS" \
-            --date 2025-10-17 \
-            --output "$OUTDIR/daily.md" \
-            --group-actions
-          test -s "$OUTDIR/daily.md"
-
-          team-digest monthly \
-            --logs-dir "$EXLOGS" \
-            --output "$OUTDIR/monthly.md" \
-            --group-actions --emit-kpis --owner-breakdown
-          test -s "$OUTDIR/monthly.md"
-
-          echo "Built files:"
-          ls -la "$OUTDIR"
+        run: python scripts/ci_build_digests.py
 
       - name: Upload digests artifact
         uses: actions/upload-artifact@v4
