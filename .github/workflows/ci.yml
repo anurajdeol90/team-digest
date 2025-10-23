@@ -75,22 +75,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-import glob, zipfile, sys
-whs = sorted(glob.glob("dist/*.whl"))
-if not whs:
-    print("ERROR: no wheel in dist/", file=sys.stderr)
-    sys.exit(2)
-wh = whs[0]
-print("Inspecting:", wh)
-with zipfile.ZipFile(wh) as z:
-    names = [n for n in z.namelist() if "team_digest/examples/" in n]
-    for n in names:
-        print(n)
-    if not names:
-        print("ERROR: examples not found in wheel", file=sys.stderr)
-        sys.exit(2)
-PY
+          wh=$(ls -1 dist/*.whl | head -n1)
+          echo "Inspecting wheel: $wh"
+          # List contents and check for examples
+          if ! unzip -l "$wh" | grep -q "team_digest/examples/"; then
+            echo "ERROR: examples not found in wheel" >&2
+            exit 2
+          fi
+          unzip -l "$wh" | grep "team_digest/examples/" || true
       - name: Smoke: CLI help
         run: |
           pip install dist/*.whl
