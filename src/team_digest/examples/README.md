@@ -36,6 +36,3 @@ Notes
 The sample logs are fictional but demonstrate expected structure.
 
 The prod.yml config file illustrates how you could map owners, Slack posting, etc.
-
-
-

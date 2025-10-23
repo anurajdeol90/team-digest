@@ -1,38 +1,31 @@
-# Auto-detect text files and normalize to LF in the repo
+# Auto-detect text files and normalize to LF
 * text=auto eol=lf
 
-# Treat Python as text
-*.py text
+# Source code
+*.py     text eol=lf
 
-# Ensure YAML (including GitHub Actions) uses LF
-*.yml  text eol=lf
-*.yaml text eol=lf
-.github/workflows/*.yml  text eol=lf
-.github/workflows/*.yaml text eol=lf
+# Config / metadata
+*.toml   text eol=lf
+*.ini    text eol=lf
+*.cfg    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+.github/workflows/*.yml   text eol=lf
+.github/workflows/*.yaml  text eol=lf
 
-# Markdown/docs use LF
-*.md  text eol=lf
-docs/** text eol=lf
+# Documentation
+*.md     text eol=lf
+docs/**  text eol=lf
 
-# Shell/PowerShell scripts as text
-*.sh  text eol=lf
-*.ps1 text eol=lf
-*.bat text
+# Scripts
+*.sh     text eol=lf
+*.ps1    text eol=lf
+*.bat    text eol=lf
 
-# Common config as text
-*.toml text eol=lf
-*.ini  text eol=lf
-*.cfg  text eol=lf
-
-# Don’t diff binaries
-*.png  binary
-*.jpg  binary
-*.jpeg binary
-*.gif  binary
-*.pdf  binary
-*.zip  binary
-
-# Keep Actions workflows on LF line endings
-.github/workflows/*.yml text eol=lf
-*.sh text eol=lf
-
+# Binary assets
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.pdf    binary
+*.zip    binary

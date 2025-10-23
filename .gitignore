@@ -1,28 +1,30 @@
-# Python
+# Byte-compiled / cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-*.pyd
-*.egg-info/
-.eggs/
 
-# Builds / dist
+# Virtual environments
+.venv*/
+venv*/
+
+# Distribution / packaging
 build/
 dist/
-wheelhouse/
+*.egg-info/
 
-# Local envs
-.venv/
-.publish/
-env/
-venv/
+# Tooling caches
+.cache/
+.mypy_cache/
+.pytest_cache/
 
-# Local outputs & scratch
-out/
-customer_test/
-pyproject_repair.ps1
+# IDE/editor configs (optional)
+.vscode/
+.idea/
 
-# OS/editor
-.DS_Store
-Thumbs.db
-*.swp
+# Generated outputs (not for repo)
+outputs/
+
+# Local demos & contributor docs (not shipping to customers)
+daily-demo.md
+weekly-demo.md
+Contributing.md

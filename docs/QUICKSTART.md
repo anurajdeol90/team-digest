@@ -31,6 +31,3 @@ Set `SLACK\_WEBHOOK\_URL` as a repository secret. The workflows will post when p
 \- \*\*group\_actions\*\* (default): bucket \*\*High / Medium / Low\*\* with owner-sort inside.
 
 \- \*\*KPIs\*\*: monthly and weekly can emit executive KPIs + top owners table (enabled in workflow).
-
-
-

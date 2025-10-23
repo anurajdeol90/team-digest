@@ -3,9 +3,12 @@
 import json
 import os
 import urllib.request
+from typing import Optional
 
 
-def post_markdown(text: str, webhook: str | None = None, *, timeout: int = 20) -> int:
+def post_markdown(
+    text: str, webhook: Optional[str] = None, *, timeout: int = 20
+) -> int:
     """
     Posts up to ~39k chars to a Slack incoming webhook.
     Returns HTTP status code (200 on success). No-op if webhook missing.

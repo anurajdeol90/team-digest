@@ -102,7 +102,7 @@ $env:SLACK_WEBHOOK="https://hooks.slack.com/services/XXX/YYY/ZZZ"
 Post a weekly digest:
 
 ```bash
-team-digest weekly \	
+team-digest weekly \
   --logs-dir logs \
   --start 2025-10-13 --end 2025-10-19 \
   --output weekly.md \

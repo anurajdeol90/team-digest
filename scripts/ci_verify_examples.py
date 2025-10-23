@@ -43,6 +43,7 @@ def main() -> None:
     try:
         import importlib.metadata as m
         import team_digest
+
         print("dist version:", m.version("team-digest"))
         print("module __version__:", getattr(team_digest, "__version__", "unknown"))
     except Exception as e:
@@ -65,28 +66,28 @@ def main() -> None:
 
         # WEEKLY — includes KPIs & owner breakdown
         must_run(
-            f'team-digest weekly '
+            f"team-digest weekly "
             f'--logs-dir "{logs_path}" '
-            f'--start 2025-10-13 --end 2025-10-19 '
+            f"--start 2025-10-13 --end 2025-10-19 "
             f'--output "{os.path.join(outdir, "weekly.md")}" '
-            f'--group-actions --emit-kpis --owner-breakdown'
+            f"--group-actions --emit-kpis --owner-breakdown"
         )
 
         # DAILY
         must_run(
-            f'team-digest daily '
+            f"team-digest daily "
             f'--logs-dir "{logs_path}" '
-            f'--date 2025-10-17 '
+            f"--date 2025-10-17 "
             f'--output "{os.path.join(outdir, "daily.md")}" '
-            f'--group-actions'
+            f"--group-actions"
         )
 
         # MONTHLY — add optional flags only if supported by installed CLI
         monthly_cmd = (
-            f'team-digest monthly '
+            f"team-digest monthly "
             f'--logs-dir "{logs_path}" '
             f'--output "{os.path.join(outdir, "monthly.md")}" '
-            f'--group-actions'
+            f"--group-actions"
         )
         base_cmd = "team-digest monthly"
         if cmd_supports_flag(base_cmd, "--emit-kpis"):

@@ -5,12 +5,15 @@ from textwrap import dedent
 
 from team_digest.team_digest_runtime import slice_sections, aggregate_range
 
+
 def write_log(dirpath: Path, datestr: str, body: str):
     dirpath.mkdir(parents=True, exist_ok=True)
     (dirpath / f"notes-{datestr}.md").write_text(body, encoding="utf-8")
 
+
 def test_slice_sections_basic():
-    md = dedent("""\
+    md = dedent(
+        """\
         ## Summary
         Hello
 
@@ -28,15 +31,21 @@ def test_slice_sections_basic():
 
         ## Notes
         - misc
-    """)
+    """
+    )
     secs = slice_sections(md)
     assert "Summary" in secs and "Decisions" in secs and "Actions" in secs
     assert "Risks" in secs and "Dependencies" in secs and "Notes" in secs
     assert "Hello" in secs["Summary"]
 
+
 def test_aggregate_grouped(tmp_path: Path):
     logs = tmp_path / "logs"
-    write_log(logs, "2025-10-13", dedent("""\
+    write_log(
+        logs,
+        "2025-10-13",
+        dedent(
+            """\
         ## Summary
         Day summary.
 
@@ -50,7 +59,9 @@ def test_aggregate_grouped(tmp_path: Path):
 
         ## Risks
         - Slack webhook misconfiguration could block delivery.
-    """))
+    """
+        ),
+    )
     out = aggregate_range(
         logs_dir=logs,
         start=dt.date(2025, 10, 13),
@@ -69,14 +80,21 @@ def test_aggregate_grouped(tmp_path: Path):
     assert "## Executive KPIs" in out
     assert "Actions:" in out and "Decisions:" in out and "Risks:" in out
 
+
 def test_aggregate_flat_by_name_order(tmp_path: Path):
     logs = tmp_path / "logs"
-    write_log(logs, "2025-10-14", dedent("""\
+    write_log(
+        logs,
+        "2025-10-14",
+        dedent(
+            """\
         ## Actions
         - [medium] Priya to prepare slides.
         - [high] Alex to configure Slack channel integration.
         - [low] Sam to capture screenshots.
-    """))
+    """
+        ),
+    )
     out = aggregate_range(
         logs_dir=logs,
         start=dt.date(2025, 10, 14),
@@ -88,7 +106,7 @@ def test_aggregate_flat_by_name_order(tmp_path: Path):
         owner_breakdown=False,
     )
     # Expect Alex block before Priya before Sam (alphabetical by owner)
-    lines = [l for l in out.splitlines() if l.startswith("- [")]
+    lines = [line for line in out.splitlines() if line.startswith("- [")]
     assert lines[0].startswith("- [high] Alex")
     assert lines[1].startswith("- [medium] Priya")
     assert lines[2].startswith("- [low] Sam")

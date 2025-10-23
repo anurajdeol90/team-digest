@@ -5,6 +5,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 import datetime as dt
+from typing import Optional
 
 SECTION_ORDER = ["Summary", "Decisions", "Actions", "Risks", "Dependencies", "Notes"]
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -136,7 +137,7 @@ def aggregate_range(
     start: dt.date,
     end: dt.date,
     *,
-    title: str | None = None,
+    title: Optional[str] = None,
     group_actions: bool = True,
     flat_by_name: bool = False,
     emit_kpis: bool = False,

@@ -9,6 +9,7 @@ EXLOGS = os.path.join(RUNNER_TEMP, "exlogs")
 os.makedirs(OUTDIR, exist_ok=True)
 os.makedirs(EXLOGS, exist_ok=True)
 
+
 def copy_tree(traversable, dst):
     os.makedirs(dst, exist_ok=True)
     for ch in traversable.iterdir():
@@ -18,6 +19,7 @@ def copy_tree(traversable, dst):
         else:
             with ch.open("rb") as rf, open(target, "wb") as wf:
                 wf.write(rf.read())
+
 
 # Keep resource context alive while copying
 root = files("team_digest") / "examples" / "logs"

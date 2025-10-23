@@ -7,6 +7,7 @@ EXLOGS = os.environ["EXLOGS"]
 OUTDIR = os.environ["OUTDIR"]
 Path(OUTDIR).mkdir(parents=True, exist_ok=True)
 
+
 def run(cmd: str, outfile: Path | None = None):
     print("\n$ " + cmd + "\n", flush=True)
     r = sp.run(cmd, shell=True, text=True, capture_output=True)
@@ -24,26 +25,30 @@ def run(cmd: str, outfile: Path | None = None):
         if not outfile.exists() or outfile.stat().st_size == 0:
             if r.stdout and r.stdout.strip():
                 outfile.write_text(r.stdout, encoding="utf-8")
-                print(f"[fallback] wrote stdout to {outfile} ({outfile.stat().st_size} bytes)")
+                print(
+                    f"[fallback] wrote stdout to {outfile} ({outfile.stat().st_size} bytes)"
+                )
             else:
                 print(f"[warning] no stdout to write for {outfile}")
+
 
 def must_exist_nonempty(p: Path):
     if not p.exists() or p.stat().st_size == 0:
         raise SystemExit(f"ERROR: expected non-empty file missing: {p}")
     print(f"OK: {p} {p.stat().st_size} bytes")
 
-weekly_path  = Path(OUTDIR) / "weekly.md"
-daily_path   = Path(OUTDIR) / "daily.md"
+
+weekly_path = Path(OUTDIR) / "weekly.md"
+daily_path = Path(OUTDIR) / "daily.md"
 monthly_path = Path(OUTDIR) / "monthly.md"
 
 # weekly
 run(
     cmd=(
         f'team-digest weekly --logs-dir "{EXLOGS}" '
-        f'--start 2025-10-13 --end 2025-10-19 '
+        f"--start 2025-10-13 --end 2025-10-19 "
         f'--output "{weekly_path}" '
-        f'--group-actions --emit-kpis --owner-breakdown'
+        f"--group-actions --emit-kpis --owner-breakdown"
     ),
     outfile=weekly_path,
 )
@@ -53,9 +58,9 @@ must_exist_nonempty(weekly_path)
 run(
     cmd=(
         f'team-digest daily --logs-dir "{EXLOGS}" '
-        f'--date 2025-10-17 '
+        f"--date 2025-10-17 "
         f'--output "{daily_path}" '
-        f'--group-actions'
+        f"--group-actions"
     ),
     outfile=daily_path,
 )
@@ -66,7 +71,7 @@ run(
     cmd=(
         f'team-digest monthly --logs-dir "{EXLOGS}" '
         f'--output "{monthly_path}" '
-        f'--group-actions --emit-kpis --owner-breakdown'
+        f"--group-actions --emit-kpis --owner-breakdown"
     ),
     outfile=monthly_path,
 )

@@ -75,4 +75,3 @@ push = true
 
 [tool.bumpver.file_patterns]
 "src/team_digest/__init__.py" = ['__version__ = "{version}"']
-

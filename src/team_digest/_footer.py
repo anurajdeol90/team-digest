@@ -2,6 +2,7 @@
 from __future__ import annotations
 from importlib import metadata
 
+
 def append_footer(markdown: str, fmt: str = "md") -> str:
     """Append a small generator/version footer to Markdown or JSON-bound content."""
     try:

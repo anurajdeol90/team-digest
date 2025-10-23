@@ -13,34 +13,42 @@ VALID_PRIOS = {"high", "medium", "low"}
 
 # Wide bullet detection: -, *, +, numbered 1./1), checkboxes, unicode bullets/dashes
 BULLET_RE = re.compile(
-    r'^[\s\u00A0]*('
-    r'(?:[-*+])|'              # -, *, +
-    r'(?:\d+[.)])|'            # 1. or 1)
-    r'(?:\[[ xX\-]\])|'        # [ ], [x], [-]
-    r'[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]'  # • ‣ ⁃ ∙ ▪ ▫ ● ◦ – —
-    r')\s+',
-    re.M
+    r"^[\s\u00A0]*("
+    r"(?:[-*+])|"  # -, *, +
+    r"(?:\d+[.)])|"  # 1. or 1)
+    r"(?:\[[ xX\-]\])|"  # [ ], [x], [-]
+    r"[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014]"  # • ‣ ⁃ ∙ ▪ ▫ ● ◦ – —
+    r")\s+",
+    re.M,
 )
 # Same as BULLET_RE but allows an optional leading backslash (escaped bullets in logs)
 LEAD_TOKEN_RE = re.compile(
-    r'^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+'
+    r"^[\s\u00A0]*\\?(?:[-*+]|\d+[.)]|\[[ xX\-]\]|[\u2022\u2023\u2043\u2219\u25AA\u25AB\u25CF\u25E6\u2013\u2014])\s+"
 )
 # tolerant header locator
-HDR_LINE = re.compile(r'^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$', re.M)
+HDR_LINE = re.compile(r"^[ \t]*#{2,6}\s*([A-Za-z][^\n#]*)$", re.M)
 
 # fix common mojibake from mis-decoding
 MOJIBAKE_FIXES = {
-    "â€“": "–", "â€”": "—", "â€˜": "‘", "â€™": "’",
-    "â€œ": "“", "â€\x9d": "”", "â€¢": "•",
+    "â€“": "–",
+    "â€”": "—",
+    "â€˜": "‘",
+    "â€™": "’",
+    "â€œ": "“",
+    "â€\x9d": "”",
+    "â€¢": "•",
 }
+
 
 def fix_mojibake(s: str) -> str:
     for k, v in MOJIBAKE_FIXES.items():
         s = s.replace(k, v)
     return s
 
+
 def normalize_heading(raw: str) -> str:
     return raw.strip().split()[0].rstrip(":-—–").lower()
+
 
 def slice_sections(text: str) -> dict:
     text = fix_mojibake(text.replace("\r\n", "\n"))
@@ -60,11 +68,13 @@ def slice_sections(text: str) -> dict:
                 break
     return sections
 
+
 def daterange(start: dt.date, end: dt.date):
     cur = start
     while cur <= end:
         yield cur
         cur += dt.timedelta(days=1)
+
 
 def collect_bullets(block: str):
     if not block:
@@ -78,19 +88,24 @@ def collect_bullets(block: str):
             out.append(s.strip())
     return out
 
+
 def clean_item_text(line: str) -> str:
     s = LEAD_TOKEN_RE.sub("", line).strip()
-    s = re.sub(r'^[\\]+', "", s).strip()
+    s = re.sub(r"^[\\]+", "", s).strip()
     return s
+
 
 def normalize_block_text(block: str) -> str:
     if not block:
         return ""
     lines = []
     for ln in fix_mojibake(block).splitlines():
-        ln = re.sub(r'^[ \t]*\\(?=[-*+])', "", ln)  # drop leading backslash before a bullet
+        ln = re.sub(
+            r"^[ \t]*\\(?=[-*+])", "", ln
+        )  # drop leading backslash before a bullet
         lines.append(ln)
     return "\n".join(lines).strip()
+
 
 def detect_priority(line: str):
     m = re.search(r"\[(high|medium|low|p0|p1|p2)\]", line, re.I)
@@ -100,12 +115,15 @@ def detect_priority(line: str):
         return label, PRIORITY_RANK.get(label, 3)
     return "other", 3
 
+
 # --- extract owner name for secondary sort ---
 NAME_PATTERNS = [
-    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),            # ] Alex to
-    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),        # ] Priya — ...
-    re.compile(r"\(owner:\s*([^)]+?)\)", re.I),                   # (owner: Name)
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+to\b"),  # ] Alex to
+    re.compile(r"\]\s*([A-Z][\w.\- ]{1,40}?)\s+[—–-]\s+"),  # ] Priya — ...
+    re.compile(r"\(owner:\s*([^)]+?)\)", re.I),  # (owner: Name)
 ]
+
+
 def extract_name(text: str) -> str:
     for rx in NAME_PATTERNS:
         m = rx.search(text)
@@ -114,41 +132,58 @@ def extract_name(text: str) -> str:
     m = re.search(r"\b([A-Z][a-zA-Z.\-]+(?:\s+[A-Z][a-zA-Z.\-]+)?)\b", text)
     return m.group(1) if m else ""
 
+
 # NEW: strip any leading priority tag so we don't duplicate labels
 def strip_priority_tag(s: str) -> str:
-    return re.sub(r'^\s*\[(?:high|medium|low|p0|p1|p2)\]\s*', '', s, flags=re.I)
+    return re.sub(r"^\s*\[(?:high|medium|low|p0|p1|p2)\]\s*", "", s, flags=re.I)
+
 
 def main():
-    p = argparse.ArgumentParser(description="Aggregate logs into a weekly/monthly (or any range) digest.")
+    p = argparse.ArgumentParser(
+        description="Aggregate logs into a weekly/monthly (or any range) digest."
+    )
     p.add_argument("--logs-dir", default="logs")
-    p.add_argument("--start", required=True)   # YYYY-MM-DD inclusive
-    p.add_argument("--end", required=True)     # YYYY-MM-DD inclusive
+    p.add_argument("--start", required=True)  # YYYY-MM-DD inclusive
+    p.add_argument("--end", required=True)  # YYYY-MM-DD inclusive
     p.add_argument("--output", required=True)
     p.add_argument("--title", default="")
     p.add_argument("--expect-missing", action="store_true")
     p.add_argument("--group-actions", action="store_true")
-    p.add_argument("--flat-by-name", action="store_true",
-                   help="Sort actions globally by name→priority→text (no priority buckets)")
+    p.add_argument(
+        "--flat-by-name",
+        action="store_true",
+        help="Sort actions globally by name→priority→text (no priority buckets)",
+    )
     # NEW: exec KPIs
-    p.add_argument("--emit-kpis", action="store_true",
-                   help="Emit an Executive KPIs block near the top (actions, H/M/L split, decisions, risks, owners)")
-    p.add_argument("--owner-breakdown", action="store_true",
-                   help="Emit a per-owner table (High/Med/Low/Total), sorted by Total desc")
-    p.add_argument("--owner-top", type=int, default=8,
-                   help="Max owners to show in the breakdown (others combined as “Other”). Default: 8")
+    p.add_argument(
+        "--emit-kpis",
+        action="store_true",
+        help="Emit an Executive KPIs block near the top (actions, H/M/L split, decisions, risks, owners)",
+    )
+    p.add_argument(
+        "--owner-breakdown",
+        action="store_true",
+        help="Emit a per-owner table (High/Med/Low/Total), sorted by Total desc",
+    )
+    p.add_argument(
+        "--owner-top",
+        type=int,
+        default=8,
+        help="Max owners to show in the breakdown (others combined as “Other”). Default: 8",
+    )
     args = p.parse_args()
 
     logs_dir = Path(args.logs_dir)
     start = dt.date.fromisoformat(args.start)
-    end   = dt.date.fromisoformat(args.end)
+    end = dt.date.fromisoformat(args.end)
 
     acc = {k: [] for k in SECTION_ORDER}
     action_items = []  # list of (rank,label,who,text)
     matched = []
 
     # NEW: counters for KPIs
-    prio_counts = Counter()             # "high"/"medium"/"low"/"other"
-    owner_counts = defaultdict(lambda: Counter({"high":0, "medium":0, "low":0}))
+    prio_counts = Counter()  # "high"/"medium"/"low"/"other"
+    owner_counts = defaultdict(lambda: Counter({"high": 0, "medium": 0, "low": 0}))
     decisions_count = 0
     risks_count = 0
     owners_seen = set()
@@ -175,7 +210,9 @@ def main():
                 decisions_count += len(dec_bul)
             else:
                 # count non-empty lines as a fallback
-                decisions_count += sum(1 for L in secs["Decisions"].splitlines() if L.strip())
+                decisions_count += sum(
+                    1 for L in secs["Decisions"].splitlines() if L.strip()
+                )
 
         if secs.get("Risks"):
             risk_bul = collect_bullets(secs["Risks"])
@@ -189,12 +226,14 @@ def main():
         bullets = collect_bullets(actions_block)
         if not bullets and actions_block:
             lines = [L.strip() for L in actions_block.splitlines() if L.strip()]
-            if any(re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines):
+            if any(
+                re.search(r"\[(?:high|medium|low|p0|p1|p2)\]", L, re.I) for L in lines
+            ):
                 bullets = lines
         for line in bullets:
             label, rank = detect_priority(line)
             text = clean_item_text(line)
-            who  = extract_name(text).lower()
+            who = extract_name(text).lower()
             owners_seen.add(who) if who else None
             # KPI tallies
             prio_counts[label] += 1
@@ -215,9 +254,13 @@ def main():
         H, M, L = prio_counts["high"], prio_counts["medium"], prio_counts["low"]
         owners_total = len([o for o in owners_seen if o])
         out.append("## Executive KPIs")
-        out.append(f"- **Actions:** {len(action_items)} (High: {H}, Medium: {M}, Low: {L})")
+        out.append(
+            f"- **Actions:** {len(action_items)} (High: {H}, Medium: {M}, Low: {L})"
+        )
         out.append(f"- **Decisions:** {decisions_count}   ·   **Risks:** {risks_count}")
-        out.append(f"- **Owners:** {owners_total}   ·   **Days with notes:** {len(matched)}")
+        out.append(
+            f"- **Owners:** {owners_total}   ·   **Days with notes:** {len(matched)}"
+        )
         out.append("")
 
         if args.owner_breakdown and owner_counts:
@@ -231,9 +274,9 @@ def main():
             rest = rows[args.owner_top :]
             if rest:
                 rest_high = sum(r[1] for r in rest)
-                rest_med  = sum(r[2] for r in rest)
-                rest_low  = sum(r[3] for r in rest)
-                rest_tot  = sum(r[4] for r in rest)
+                rest_med = sum(r[2] for r in rest)
+                rest_low = sum(r[3] for r in rest)
+                rest_tot = sum(r[4] for r in rest)
                 top.append(("Other", rest_high, rest_med, rest_low, rest_tot))
 
             out.append("#### Owner breakdown (top)")
@@ -261,7 +304,9 @@ def main():
         out.append("## Actions")
         if args.flat_by_name:
             # Global: name → priority → text, show ONE standardized tag
-            for _, label, who, text in sorted(action_items, key=lambda t: (t[2], t[0], t[3].lower())):
+            for _, label, who, text in sorted(
+                action_items, key=lambda t: (t[2], t[0], t[3].lower())
+            ):
                 cleaned = strip_priority_tag(text)
                 tag = f"[{label}]" if label != "other" else "[other]"
                 out.append(f"- {tag} {cleaned}")
@@ -269,17 +314,26 @@ def main():
         elif args.group_actions:
             # Bucketed: priority → name → text; no per-line tag (bucket header implies priority)
             buckets = {"high": [], "medium": [], "low": [], "other": []}
-            for rank, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
+            for rank, label, who, text in sorted(
+                action_items, key=lambda t: (t[0], t[2], t[3].lower())
+            ):
                 key = label if label in buckets else "other"
                 buckets[key].append(f"- {strip_priority_tag(text)}")
-            for head, title_h in [("high","High"), ("medium","Medium"), ("low","Low"), ("other","Other")]:
+            for head, title_h in [
+                ("high", "High"),
+                ("medium", "Medium"),
+                ("low", "Low"),
+                ("other", "Other"),
+            ]:
                 if buckets[head]:
                     out.append(f"### {title_h} priority")
                     out.extend(buckets[head])
                     out.append("")
         else:
             # Flat legacy: priority → name → text; show one standardized tag for clarity
-            for _, label, who, text in sorted(action_items, key=lambda t: (t[0], t[2], t[3].lower())):
+            for _, label, who, text in sorted(
+                action_items, key=lambda t: (t[0], t[2], t[3].lower())
+            ):
                 cleaned = strip_priority_tag(text)
                 tag = f"[{label}]" if label != "other" else "[other]"
                 out.append(f"- {tag} {cleaned}")
@@ -291,6 +345,7 @@ def main():
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     io.open(args.output, "w", encoding="utf-8").write("\n".join(out).rstrip() + "\n")
+
 
 if __name__ == "__main__":
     main()
