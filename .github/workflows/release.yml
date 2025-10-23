@@ -42,14 +42,10 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Sanity: examples packaged in wheel
-        run: >
-          python -c "import glob,zipfile,sys;
-          wh=sorted(glob.glob('dist/*.whl'))[0];
-          print('Inspecting', wh);
-          z=zipfile.ZipFile(wh);
-          files=[n for n in z.namelist() if n.startswith('team_digest/examples/')];
-          print('\\n'.join(files) or 'NO_EXAMPLES_FOUND');
-          assert files, 'ERROR: examples/ missing from wheel'"
+        run: |
+          python -c "import glob,zipfile; wh=sorted(glob.glob('dist/*.whl'))[0]; print('Inspecting', wh); z=zipfile.ZipFile(wh); files=[n for n in z.namelist() if n.startswith('team_digest/examples/')]; print('\n'.join(files) or 'NO_EXAMPLES_FOUND'); assert files, 'ERROR: examples/ missing from wheel'"
+
+
 
       - name: Extract package version
         id: ver
