@@ -2,6 +2,20 @@
 max-line-length = 120
 extend-ignore = E203, W503
 
+# Do not lint non-source directories
+exclude =
+    .git,
+    .githooks,
+    .venv*,
+    venv*,
+    build,
+    dist,
+    outputs,
+    docs,
+    examples,
+    __pycache__
+
+# Keep the targeted per-file relaxations you already set
 per-file-ignores =
     scripts/*.py: E401, E501, F401
     tests/test_runtime.py: E741

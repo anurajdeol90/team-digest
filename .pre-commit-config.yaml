@@ -17,6 +17,8 @@ repos:
     rev: 7.1.1
     hooks:
       - id: flake8
+        # Only lint our code — not venvs, caches, or vendor stuff
+        files: ^(src/|tests/|scripts/)
         args:
           - --show-source
           - --statistics

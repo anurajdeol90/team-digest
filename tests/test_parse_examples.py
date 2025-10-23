@@ -1,5 +1,4 @@
 import sys
-from pathlib import Path
 import subprocess as sp
 import importlib.resources as r
 
