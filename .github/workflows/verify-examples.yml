@@ -21,7 +21,7 @@ jobs:
           python -m pip install -U pip
           pip install -U team-digest
 
-      - name: Prepare OUTDIR and copy packaged example logs to real FS
+      - name: Prepare OUTDIR and copy packaged example logs
         id: prep
         shell: bash
         run: |
@@ -30,30 +30,21 @@ jobs:
           EXLOGS="$RUNNER_TEMP/exlogs"
           mkdir -p "$OUTDIR" "$EXLOGS"
 
-          # Robust copy of packaged examples → real folder
-          python -c "import os, io
-from importlib.resources import files
-from importlib.resources.abc import Traversable
-src = files('team_digest') / 'examples' / 'logs'
-def copy_tree(t: Traversable, dst: str):
-    for ch in t.iterdir():
-        p = os.path.join(dst, ch.name)
-        if ch.is_dir():
-            os.makedirs(p, exist_ok=True)
-            copy_tree(ch, p)
-        else:
-            with ch.open('rb') as rf, open(p, 'wb') as wf:
-                wf.write(rf.read())
-copy_tree(src, os.environ['RUNNER_TEMP'] + '/exlogs')
-print(os.environ['RUNNER_TEMP'] + '/exlogs')" > /dev/null
+          # Resolve resource to a real filesystem path (no heredocs, one-liner)
+          SRC=$(python -c "from importlib.resources import files, as_file; from contextlib import ExitStack; es=ExitStack(); p=es.enter_context(as_file(files('team_digest')/'examples'/'logs')); print(p)")
+          echo "Resolved packaged logs path: $SRC"
+
+          # Copy to our real temp folder
+          cp -R \"$SRC\"/. \"$EXLOGS\"/
 
           echo "outdir=$OUTDIR" >> "$GITHUB_OUTPUT"
           echo "exlogs=$EXLOGS" >> "$GITHUB_OUTPUT"
 
           echo "OUTDIR: $OUTDIR"
           echo "EXLOGS: $EXLOGS"
-          echo "Packaged logs copied:"
-          ls -la "$EXLOGS"
+          echo "Copied logs tree:"
+          ls -la "$EXLOGS" || true
+          find "$EXLOGS" -type f -maxdepth 2 -print || true
 
       - name: Show installed version
         shell: bash
