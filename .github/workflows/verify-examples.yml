@@ -21,22 +21,39 @@ jobs:
           python -m pip install -U pip
           pip install -U team-digest
 
-      - name: Prepare OUTDIR and EXLOGS
+      - name: Prepare OUTDIR and copy packaged example logs to real FS
         id: prep
         shell: bash
         run: |
           set -euo pipefail
           OUTDIR="$RUNNER_TEMP/td-verify"
-          mkdir -p "$OUTDIR"
+          EXLOGS="$RUNNER_TEMP/exlogs"
+          mkdir -p "$OUTDIR" "$EXLOGS"
 
-          # Resolve packaged example logs inside the installed wheel (no heredocs)
-          EXLOGS=$(python -c "from importlib.resources import files; print(files('team_digest')/'examples'/'logs')")
+          # Robust copy of packaged examples → real folder
+          python -c "import os, io
+from importlib.resources import files
+from importlib.resources.abc import Traversable
+src = files('team_digest') / 'examples' / 'logs'
+def copy_tree(t: Traversable, dst: str):
+    for ch in t.iterdir():
+        p = os.path.join(dst, ch.name)
+        if ch.is_dir():
+            os.makedirs(p, exist_ok=True)
+            copy_tree(ch, p)
+        else:
+            with ch.open('rb') as rf, open(p, 'wb') as wf:
+                wf.write(rf.read())
+copy_tree(src, os.environ['RUNNER_TEMP'] + '/exlogs')
+print(os.environ['RUNNER_TEMP'] + '/exlogs')" > /dev/null
 
           echo "outdir=$OUTDIR" >> "$GITHUB_OUTPUT"
           echo "exlogs=$EXLOGS" >> "$GITHUB_OUTPUT"
 
           echo "OUTDIR: $OUTDIR"
           echo "EXLOGS: $EXLOGS"
+          echo "Packaged logs copied:"
+          ls -la "$EXLOGS"
 
       - name: Show installed version
         shell: bash
@@ -49,7 +66,7 @@ jobs:
           EXLOGS: ${{ steps.prep.outputs.exlogs }}
           OUTDIR: ${{ steps.prep.outputs.outdir }}
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           echo "EXLOGS=$EXLOGS"
           echo "OUTDIR=$OUTDIR"
 
@@ -58,28 +75,23 @@ jobs:
             --start 2025-10-13 --end 2025-10-19 \
             --output "$OUTDIR/weekly.md" \
             --group-actions --emit-kpis --owner-breakdown
+          test -s "$OUTDIR/weekly.md"
 
           team-digest daily \
             --logs-dir "$EXLOGS" \
             --date 2025-10-17 \
             --output "$OUTDIR/daily.md" \
             --group-actions
+          test -s "$OUTDIR/daily.md"
 
           team-digest monthly \
             --logs-dir "$EXLOGS" \
             --output "$OUTDIR/monthly.md" \
             --group-actions --emit-kpis --owner-breakdown
+          test -s "$OUTDIR/monthly.md"
 
-      - name: Verify outputs exist
-        shell: bash
-        env:
-          OUTDIR: ${{ steps.prep.outputs.outdir }}
-        run: |
-          set -euo pipefail
-          ls -l "$OUTDIR"
-          test -f "$OUTDIR/weekly.md"
-          test -f "$OUTDIR/daily.md"
-          test -f "$OUTDIR/monthly.md"
+          echo "Built files:"
+          ls -la "$OUTDIR"
 
       - name: Upload digests artifact
         uses: actions/upload-artifact@v4
