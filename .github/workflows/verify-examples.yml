@@ -30,21 +30,43 @@ jobs:
           EXLOGS="$RUNNER_TEMP/exlogs"
           mkdir -p "$OUTDIR" "$EXLOGS"
 
-          # Resolve resource to a real filesystem path (no heredocs, one-liner)
-          SRC=$(python -c "from importlib.resources import files, as_file; from contextlib import ExitStack; es=ExitStack(); p=es.enter_context(as_file(files('team_digest')/'examples'/'logs')); print(p)")
-          echo "Resolved packaged logs path: $SRC"
+          # Copy the resources INSIDE Python so the as_file() context stays alive.
+          python - <<'PY'
+import os
+from importlib.resources import files, as_file
+from contextlib import ExitStack
 
-          # Copy to our real temp folder
-          cp -R \"$SRC\"/. \"$EXLOGS\"/
+OUTDIR = os.environ["RUNNER_TEMP"] + "/td-verify"
+EXLOGS = os.environ["RUNNER_TEMP"] + "/exlogs"
+
+def copy_tree(traversable, dst):
+    os.makedirs(dst, exist_ok=True)
+    for ch in traversable.iterdir():
+        target = os.path.join(dst, ch.name)
+        if ch.is_dir():
+            copy_tree(ch, target)
+        else:
+            with ch.open("rb") as rf, open(target, "wb") as wf:
+                wf.write(rf.read())
+
+es = ExitStack()
+root = files("team_digest") / "examples" / "logs"
+# If the package is zipped, as_file gives us a real path while the context is open.
+with es.enter_context(as_file(root)) as root_path:
+    # Now walk the Traversable (root) and copy its bytes into EXLOGS.
+    # Using the Traversable directly keeps this working both zipped and unzipped.
+    copy_tree(root, EXLOGS)
+
+print("OUTDIR:", OUTDIR)
+print("EXLOGS:", EXLOGS)
+print("Copied:")
+for dirpath, _, filenames in os.walk(EXLOGS):
+    for f in filenames:
+        print(os.path.join(dirpath, f))
+PY
 
           echo "outdir=$OUTDIR" >> "$GITHUB_OUTPUT"
           echo "exlogs=$EXLOGS" >> "$GITHUB_OUTPUT"
-
-          echo "OUTDIR: $OUTDIR"
-          echo "EXLOGS: $EXLOGS"
-          echo "Copied logs tree:"
-          ls -la "$EXLOGS" || true
-          find "$EXLOGS" -type f -maxdepth 2 -print || true
 
       - name: Show installed version
         shell: bash
