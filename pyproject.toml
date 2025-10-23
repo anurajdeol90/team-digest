@@ -40,7 +40,7 @@ Repository = "https://github.com/AnurajDeol1990/team-digest"
 Issues = "https://github.com/AnurajDeol1990/team-digest/issues"
 
 [project.scripts]
-team-digest = "team_digest.team_email_digest:main"
+team-digest = "team_digest.__main__:main"
 
 # --- Dynamic fields ---
 [tool.setuptools.dynamic]
