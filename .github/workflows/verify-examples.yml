@@ -1,48 +1,110 @@
-name: Verify packaged examples
+name: Verify Packaged Examples
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout (for workflow + badges only)
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install team-digest from PyPI (pinned)
-        run: |
-          python -m pip install -U pip
-          pip install -U "team-digest==1.1.14"
-
-      - name: Show installed version (no heredoc)
-        run: |
-          python -c "import importlib.metadata as m, team_digest; print('dist:', m.version('team-digest')); print('__version__:', team_digest.__version__)"
-
-      - name: Run verification script
-        run: |
-          python scripts/ci_verify_examples.py
-
-      - name: Collect artifacts
+      - name: Install team-digest from PyPI
         shell: bash
         run: |
-          set -e
-          OUT="$RUNNER_TEMP/td-out"
-          mkdir -p "$OUT"
-          shopt -s nullglob
-          for p in /tmp/td-verify-*/*.md; do
-            cp "$p" "$OUT"/
-          done
-          echo "Collected files:" && ls -la "$OUT" || true
+          set -euo pipefail
+          python -m pip install -U pip
+          pip install -U team-digest
 
-      - name: Upload artifacts
+      - name: Show installed version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import importlib.metadata as m; import team_digest; print('dist:', m.version('team-digest')); print('__version__:', team_digest.__version__)"
+
+      - name: Resolve packaged examples/logs path
+        id: exlogs
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXLOGS=$(python -c "import importlib.resources as r; print(r.files('team_digest')/'examples'/'logs')")
+          echo "EXLOGS=$EXLOGS"
+          echo "EXLOGS=$EXLOGS" >> "$GITHUB_ENV"
+
+      - name: Prepare OUTDIR
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTDIR="$(mktemp -d)"
+          echo "OUTDIR=$OUTDIR"
+          echo "OUTDIR=$OUTDIR" >> "$GITHUB_ENV"
+
+      - name: Weekly (examples)
+        shell: bash
+        env:
+          EXLOGS: ${{ env.EXLOGS }}
+          OUTDIR: ${{ env.OUTDIR }}
+        run: |
+          set -euo pipefail
+          echo "\n$ team-digest weekly --logs-dir \"$EXLOGS\" --start 2025-10-13 --end 2025-10-19 --output \"$OUTDIR/weekly.md\" --group-actions --emit-kpis --owner-breakdown\n"
+          team-digest weekly \
+            --logs-dir "$EXLOGS" \
+            --start 2025-10-13 --end 2025-10-19 \
+            --output "$OUTDIR/weekly.md" \
+            --group-actions --emit-kpis --owner-breakdown
+          sed -n '1,40p' "$OUTDIR/weekly.md" || true
+          tail -n 8 "$OUTDIR/weekly.md" || true
+
+      - name: Daily (examples)
+        shell: bash
+        env:
+          EXLOGS: ${{ env.EXLOGS }}
+          OUTDIR: ${{ env.OUTDIR }}
+        run: |
+          set -euo pipefail
+          echo "\n$ team-digest daily --logs-dir \"$EXLOGS\" --date 2025-10-17 --output \"$OUTDIR/daily.md\" --group-actions\n"
+          team-digest daily \
+            --logs-dir "$EXLOGS" \
+            --date 2025-10-17 \
+            --output "$OUTDIR/daily.md" \
+            --group-actions
+          sed -n '1,40p' "$OUTDIR/daily.md" || true
+          tail -n 8 "$OUTDIR/daily.md" || true
+
+      - name: Monthly (examples)
+        shell: bash
+        env:
+          EXLOGS: ${{ env.EXLOGS }}
+          OUTDIR: ${{ env.OUTDIR }}
+        run: |
+          set -euo pipefail
+          echo "\n$ team-digest monthly --logs-dir \"$EXLOGS\" --output \"$OUTDIR/monthly.md\" --group-actions --emit-kpis --owner-breakdown\n"
+          team-digest monthly \
+            --logs-dir "$EXLOGS" \
+            --output "$OUTDIR/monthly.md" \
+            --group-actions --emit-kpis --owner-breakdown
+          sed -n '1,40p' "$OUTDIR/monthly.md" || true
+          tail -n 8 "$OUTDIR/monthly.md" || true
+
+      - name: Upload digests
         uses: actions/upload-artifact@v4
         with:
           name: verify-examples-digests
-          path: ${{ runner.temp }}/td-out/
+          path: |
+            ${{ env.OUTDIR }}/weekly.md
+            ${{ env.OUTDIR }}/daily.md
+            ${{ env.OUTDIR }}/monthly.md
+          if-no-files-found: error
