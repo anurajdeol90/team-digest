@@ -2,79 +2,89 @@ name: CI
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
-  smoke:
+  lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install package (editable) + runtime deps
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install ruff
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install -U pip
+          pip install ruff
+      - name: Run ruff
+        run: |
+          ruff check src tests
+
+  test:
+    name: Tests (pytest) — Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Install package + test deps
+        run: |
+          python -m pip install -U pip
           pip install -e .
+          pip install pytest
+      - name: PyTest
+        run: |
+          pytest -q
 
-      - name: Verify CLI wiring
-        run: team-digest --help
-
-      - name: Discover log window from repo (if any)
-        id: window
+  build:
+    name: Build (sdist + wheel)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install build
+        run: |
+          python -m pip install -U pip
+          pip install build
+      - name: Build dist
+        run: |
+          python -m build
+      - name: Sanity: wheel contains packaged examples
         shell: bash
         run: |
           set -euo pipefail
-          # Collect YYYY-MM-DD from filenames under logs/
-          if ls -1 logs/notes-*.md >/dev/null 2>&1; then
-            DATES=$(ls -1 logs/notes-*.md | sed -E 's~.*notes-([0-9]{4}-[0-9]{2}-[0-9]{2})\.md~\1~' | sort)
-            START=$(echo "$DATES" | head -n1)
-            END=$(echo "$DATES"   | tail -n1)
-            echo "start=$START" >> "$GITHUB_OUTPUT"
-            echo "end=$END"     >> "$GITHUB_OUTPUT"
-            echo "Detected logs window: $START .. $END"
-          else
-            # No logs present; fall back to today for a no-op digest that still exercises the CLI.
-            TODAY=$(date -u +%Y-%m-%d)
-            echo "start=$TODAY" >> "$GITHUB_OUTPUT"
-            echo "end=$TODAY"   >> "$GITHUB_OUTPUT"
-            echo "No logs found; using today $TODAY for smoke test."
-          fi
-
-      - name: Build weekly digest (smoke test)
-        env:
-          START: ${{ steps.window.outputs.start }}
-          END:   ${{ steps.window.outputs.end }}
-        run: |
-          mkdir -p outputs
-          team-digest weekly \
-            --logs-dir logs \
-            --start "$START" \
-            --end   "$END" \
-            --output outputs/ci_weekly.md \
-            --group-actions \
-            --emit-kpis \
-            --owner-breakdown
-
-          echo "---- Preview (first 40 lines) ----"
-          head -n 40 outputs/ci_weekly.md || true
-
-      - name: Upload CI weekly artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-weekly
-          path: outputs/ci_weekly.md
-          
-      - name: Install pytest
-        run: pip install pytest
-
-      - name: Run unit tests
-        run: pytest -q
-
+          wh=$(ls -1 dist/*.whl | head -n1)
+          python - <<'PY'
+import glob, zipfile, sys
+wh = sorted(glob.glob("dist/*.whl"))[0]
+print("Inspecting:", wh)
+with zipfile.ZipFile(wh) as z:
+    names = [n for n in z.namelist() if "team_digest/examples/" in n]
+    for n in names:
+        print(n)
+    if not names:
+        print("ERROR: examples not found in wheel", file=sys.stderr)
+        sys.exit(2)
+PY
