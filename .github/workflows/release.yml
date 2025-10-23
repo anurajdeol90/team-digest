@@ -23,27 +23,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install build tools
-        run: |
-          python -m pip install --upgrade pip build
+        run: python -m pip install --upgrade pip build
 
       - name: Build sdist and wheel
         run: python -m build
 
       - name: Sanity: examples packaged in wheel
-        run: |
-          python - <<EOF
-          import glob, zipfile, sys
-          whls = sorted(glob.glob("dist/*.whl"))
-          if not whls:
-              sys.exit("ERROR: no wheel built in dist/")
-          wh = whls[0]
-          print("Inspecting", wh)
-          with zipfile.ZipFile(wh) as z:
-              files = [n for n in z.namelist() if n.startswith("team_digest/examples/")]
-              print("\n".join(files) or "NO_EXAMPLES_FOUND")
-              if not files:
-                  sys.exit("ERROR: examples/ missing from wheel")
-          EOF
+        run: python scripts/check_examples.py
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
