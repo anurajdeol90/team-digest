@@ -1,3 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pre-commit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pre-commit
+
+      - name: Run pre-commit on all files
+        run: |
+          git config --global core.autocrlf input
+          pre-commit run --all-files --show-diff-on-failure
+
   test:
     runs-on: ubuntu-latest
     needs: lint
@@ -36,12 +67,11 @@
       - name: Show installed package info
         run: |
           python - <<'PY'
-          import importlib, pkgutil, sys
+          import importlib, sys
           import team_digest
           print("team_digest version:", getattr(team_digest, "__version__", "n/a"))
           m = importlib.import_module("team_digest.team_digest_runtime")
           print("runtime module:", m.__file__)
-          # list packaged example files to confirm they exist at runtime
           from importlib import resources
           try:
               files = list(resources.files("team_digest").joinpath("examples").rglob("*"))
@@ -63,6 +93,4 @@
           PY
 
       - name: Run tests with coverage (verbose)
-        run: |
-          pytest -vv --cov=team_digest --cov-report=xml
-          echo "::notice title=PyTest:: Tests finished"
+        run: pytest -vv --cov=team_digest --cov-report=xml
