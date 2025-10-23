@@ -1,0 +1,62 @@
+name: Auto Tag on Version Bump
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "src/team_digest/__init__.py"
+
+permissions:
+  contents: write   # required to create & push tags
+
+jobs:
+  autotag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from package
+        id: ver
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, sys
+          p = Path("src/team_digest/__init__.py")
+          m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']',
+                        p.read_text(encoding="utf-8"))
+          if not m:
+            print("::error::No __version__ found in src/team_digest/__init__.py")
+            sys.exit(1)
+          print(f"version={m.group(1)}")
+          PY
+
+      - name: Save version output
+        id: savever
+        run: echo "version=${{ steps.ver.outputs.version }}" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check
+        run: |
+          VERSION="${{ steps.savever.outputs.version }}"
+          TAG="v${VERSION}"
+          echo "TAG=$TAG"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG already exists. Skipping."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG does not exist yet."
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.savever.outputs.version }}"
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
