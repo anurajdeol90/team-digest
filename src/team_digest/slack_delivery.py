@@ -1,16 +1,17 @@
 ﻿#!/usr/bin/env python
 # Simple Slack webhook helper (text-only; safe default)
-from __future__ import annotations
-import json, os, urllib.request
+import json
+import os
+import urllib.request
+
 
 def post_markdown(text: str, webhook: str | None = None, *, timeout: int = 20) -> int:
     """
     Posts up to ~39k chars to a Slack incoming webhook.
-    Returns HTTP status code (200 on success). Raises on network errors.
+    Returns HTTP status code (200 on success). No-op if webhook missing.
     """
     hook = (webhook or os.environ.get("SLACK_WEBHOOK_URL", "")).strip()
     if not hook:
-        # No-op if not configured
         return 0
     payload = {"text": text[:39000]}
     req = urllib.request.Request(

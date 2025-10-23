@@ -1,0 +1,8 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E203, W503
+
+per-file-ignores =
+    scripts/*.py: E401, E501, F401
+    tests/test_runtime.py: E741
+    src/team_digest/team_email_digest.py: E501
