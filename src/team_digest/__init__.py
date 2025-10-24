@@ -1,7 +1,7 @@
 ﻿# src/team_digest/__init__.py
 
 __all__ = []
-__version__ = "1.1.17"  # <— bump for each release
+__version__ = "1.1.18"  # <— bump for each release
 
 # (Optional) If you still want a runtime consistency check, you can do:
 # try:
