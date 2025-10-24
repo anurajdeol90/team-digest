@@ -1,120 +1,53 @@
 name: Weekly Digest
 
 on:
-  workflow_dispatch:
-    inputs:
-      start_date:
-        description: "Start date (YYYY-MM-DD), optional"
-        required: false
-        type: string
-      end_date:
-        description: "End date inclusive (YYYY-MM-DD), optional"
-        required: false
-        type: string
   schedule:
-    - cron: "5 0 * * 1"  # Mondays 00:05 UTC
+    - cron: "0 06 * * MON"  # every Monday 06:00 UTC
+  workflow_dispatch: {}
 
 jobs:
-  weekly:
+  run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-      id-token: write
-    env:
-      LOGS_DIR: logs
-      OUTFILE: outputs/weekly.md
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Compute last full week (Mon–Sun, ending last Sunday)
+        shell: bash
+        run: |
+          END=$(date -u -d "last sunday" +%F)
+          START=$(date -u -d "$END -6 days" +%F)
+          echo "START=$START" >> "$GITHUB_ENV"
+          echo "END=$END"     >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: python -m pip install --upgrade pip
-
-      - name: Resolve date range (use inputs or last Sunday window)
-        id: daterange
+      - name: Install team-digest
         shell: bash
         run: |
-          IN_START="${{ inputs.start_date }}"
-          IN_END="${{ inputs.end_date }}"
-          if [ -n "$IN_START" ] && [ -n "$IN_END" ]; then
-            START="$IN_START"; END="$IN_END"
-          else
-            LAST_SUN=$(date -u -d "last sunday" +%Y-%m-%d)
-            DOW=$(date -u +%u)  # 1..7
-            if [ "$DOW" = "7" ]; then LAST_SUN=$(date -u -d "$LAST_SUN -7 days" +%Y-%m-%d); fi
-            END="$LAST_SUN"; START=$(date -u -d "$END -6 days" +%Y-%m-%d)
-          fi
-          echo "start=$START" >> $GITHUB_OUTPUT
-          echo "end=$END"     >> $GITHUB_OUTPUT
-          echo "Resolved weekly window (UTC): $START .. $END"
+          python -m pip install --upgrade pip
+          pip install team-digest==1.1.18
 
-      - name: Diagnostics — repo & logs presence
+      - name: Resolve example logs path from installed package
+        id: paths
         shell: bash
         run: |
-          echo "Tracked under logs/:"
-          git ls-files "logs/*" || true
-          echo
-          echo "Directory listing of $LOGS_DIR:"
-          ls -la "$LOGS_DIR" || true
+          LOGS=$(python -c "from importlib import resources; print(resources.files('team_digest').joinpath('examples','logs'))")
+          echo "LOGS=$LOGS" >> "$GITHUB_ENV"
 
-      - name: Diagnostics — match notes by filename date (robust)
-        env:
-          START: ${{ steps.daterange.outputs.start }}
-          END:   ${{ steps.daterange.outputs.end }}
-        run: python scripts/diagnose_weekly.py
-
-      - name: Aggregate logs → weekly.md (group Actions)
+      - name: Run weekly digest
         shell: bash
         run: |
-          mkdir -p outputs
-          python scripts/digest_aggregate.py \
-            --logs-dir "$LOGS_DIR" \
-            --start "${{ steps.daterange.outputs.start }}" \
-            --end   "${{ steps.daterange.outputs.end }}" \
-            --output "$OUTFILE" \
-            --title  "Team Digest (${{ steps.daterange.outputs.start }} - ${{ steps.daterange.outputs.end }})" \
-            --group-actions \
-            --expect-missing
-          echo "---- Counts line ----"
-          grep -m1 "^_Range:" "$OUTFILE" || true
-          echo "---- Preview (first 60 lines) ----"
-          head -n 60 "$OUTFILE" || true
-
-      - name: Debug — show Actions section from digest
-        shell: bash
-        run: |
-          echo "---- Extracted Actions section ----"
-          awk '/^## Actions$/, /^## [A-Z]/{print}' "$OUTFILE" | sed '$d' || true
-
-      - name: Sanity fail if fully empty
-        shell: bash
-        run: |
-          if grep -q "^## Summary$" "$OUTFILE" || \
-             grep -q "^## Decisions$" "$OUTFILE" || \
-             grep -q "^## Actions$" "$OUTFILE" || \
-             grep -q "^## Risks$" "$OUTFILE" || \
-             grep -q "^## Dependencies$" "$OUTFILE" || \
-             grep -q "^## Notes$" "$OUTFILE"; then
-            echo "Digest contains at least one non-empty section."
-          else
-            echo "::error::Digest contains no content."
-            exit 2
-          fi
+          set -euo pipefail
+          team-digest weekly \
+            --logs-dir "$LOGS" \
+            --start "$START" \
+            --end "$END" \
+            --output "weekly_${START}_to_${END}.md" \
+            --group-actions --emit-kpis --owner-breakdown
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: weekly-digest
-          path: ${{ env.OUTFILE }}
-
-      - name: Post to Slack (optional)
-        if: env.SLACK_WEBHOOK_URL != ''
-        run: python scripts/post_to_slack.py "$OUTFILE"
+          name: weekly-digest-${{ env.START }}-to-${{ env.END }}
+          path: weekly_${{ env.START }}_to_${{ env.END }}.md
