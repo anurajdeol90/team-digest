@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 
 from .team_digest_runtime import aggregate_range
 
@@ -27,9 +27,8 @@ def _parse_date(s: str) -> dt.date:
     return dt.date.fromisoformat(s)
 
 
-def _infer_range_from_logs(logs_dir: Path) -> tuple[dt.date, dt.date]:
-    """If dates aren’t provided, infer [min,max] from notes-YYYY-MM-DD.md in logs_dir."""
-    dates: list[dt.date] = []
+def _infer_range_from_logs(logs_dir: Path) -> Tuple[dt.date, dt.date]:
+    dates: List[dt.date] = []
     for p in logs_dir.glob("notes-*.md"):
         try:
             d = dt.date.fromisoformat(p.stem.split("notes-")[1])
@@ -46,52 +45,28 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="team-digest")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    common = {
-        "logs_dir": {"flags": ["--logs-dir"], "kwargs": {"required": True}},
-        "output": {"flags": ["--output"], "kwargs": {}},
-        "group_actions": {
-            "flags": ["--group-actions"],
-            "kwargs": {"action": "store_true"},
-        },
-        "flat_by_name": {
-            "flags": ["--flat-by-name"],
-            "kwargs": {"action": "store_true"},
-        },
-        "emit_kpis": {"flags": ["--emit-kpis"], "kwargs": {"action": "store_true"}},
-        "owner_breakdown": {
-            "flags": ["--owner-breakdown"],
-            "kwargs": {"action": "store_true"},
-        },
-        "owner_top": {"flags": ["--owner-top"], "kwargs": {"type": int, "default": 8}},
-    }
-
     def add_common(p: argparse.ArgumentParser) -> None:
-        p.add_argument(*common["logs_dir"]["flags"], **common["logs_dir"]["kwargs"])
-        p.add_argument(*common["output"]["flags"], **common["output"]["kwargs"])
-        p.add_argument(
-            *common["group_actions"]["flags"], **common["group_actions"]["kwargs"]
-        )
-        p.add_argument(
-            *common["flat_by_name"]["flags"], **common["flat_by_name"]["kwargs"]
-        )
-        p.add_argument(*common["emit_kpis"]["flags"], **common["emit_kpis"]["kwargs"])
-        p.add_argument(
-            *common["owner_breakdown"]["flags"], **common["owner_breakdown"]["kwargs"]
-        )
-        p.add_argument(*common["owner_top"]["flags"], **common["owner_top"]["kwargs"])
+        p.add_argument("--logs-dir", required=True)
+        p.add_argument("--output")
+        p.add_argument("--group-actions", action="store_true")
+        p.add_argument("--flat-by-name", action="store_true")
+        p.add_argument("--emit-kpis", action="store_true")
+        p.add_argument("--owner-breakdown", action="store_true")
+        p.add_argument("--owner-top", type=int, default=8)
 
+    # daily
     p_daily = sub.add_parser("daily", help="Generate a digest for a single day")
     add_common(p_daily)
     p_daily.add_argument("--date", type=_parse_date, required=True)
 
+    # weekly
     p_weekly = sub.add_parser("weekly", help="Generate a digest for a date range")
     add_common(p_weekly)
     p_weekly.add_argument("--start", type=_parse_date)
     p_weekly.add_argument("--end", type=_parse_date)
 
-    p_monthly = sub.add_parser(
-        "monthly", help="Generate a digest for a month or given range"
-    )
+    # monthly
+    p_monthly = sub.add_parser("monthly", help="Generate a monthly digest")
     add_common(p_monthly)
     p_monthly.add_argument("--start", type=_parse_date)
     p_monthly.add_argument("--end", type=_parse_date)
@@ -99,22 +74,38 @@ def main() -> int:
     args = ap.parse_args()
     logs_dir = Path(args.logs_dir)
 
+    title: Optional[str] = None
+
     if args.cmd == "daily":
         start = end = args.date
-    else:
+
+    elif args.cmd == "weekly":
         start = getattr(args, "start", None)
         end = getattr(args, "end", None)
         if start is None or end is None:
-            # Prefer deterministic behavior in CI: infer from available logs
-            istart, iend = _infer_range_from_logs(logs_dir)
-            start = start or istart
-            end = end or iend
+            # default: last 7 days ending today
+            end = end or dt.date.today()
+            start = start or (end - dt.timedelta(days=6))
+
+    else:  # monthly
+        start = getattr(args, "start", None)
+        end = getattr(args, "end", None)
+        if start is None or end is None:
+            # Default to current month bounds
+            today = dt.date.today()
+            month_start = today.replace(day=1)
+            # end: today (keeps behavior seen in previous output)
+            month_end = today
+            start = start or month_start
+            end = end or month_end
+        # Explicit monthly title expected by tests: YYYY-MM
+        title = f"Team Digest ({start:%Y-%m})"
 
     text = aggregate_range(
         logs_dir=logs_dir,
         start=start,
         end=end,
-        title=None,
+        title=title,  # pass explicit monthly title or None for default
         group_actions=args.group_actions,
         flat_by_name=args.flat_by_name,
         emit_kpis=args.emit_kpis,
@@ -122,7 +113,6 @@ def main() -> int:
         owner_top=args.owner_top,
     )
 
-    # Append a small footer like your packaged output shows
     footer = (
         "\n---\n"
         f"_Digest generated by team-digest (v{VERSION}) — https://pypi.org/project/team-digest/_\n"
