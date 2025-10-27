@@ -48,7 +48,7 @@ jobs:
             --group-actions --emit-kpis --owner-breakdown
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: monthly-digest-${{ env.START }}-to-${{ env.END }}
           path: monthly_${{ env.START }}_to_${{ env.END }}.md
