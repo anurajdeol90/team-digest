@@ -42,7 +42,7 @@ jobs:
             --group-actions --emit-kpis --owner-breakdown
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: daily-digest-${{ env.DATE }}
           path: daily_${{ env.DATE }}.md
