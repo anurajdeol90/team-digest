@@ -1,4 +1,4 @@
-﻿name: Pages Smoke
+name: Pages Smoke
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
           mkdir -p public
           echo '<!doctype html><meta charset="utf-8"><title>Pages OK</title><h1>Pages OK ✅</h1>' > public/index.html
           touch public/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: public
 
